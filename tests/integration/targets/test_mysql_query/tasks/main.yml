@@ -9,3 +9,5 @@
 - include_tasks: issue-28.yml
 
 - include_tasks: session_vars.yml
+
+- include_tasks: issue-782.yml
