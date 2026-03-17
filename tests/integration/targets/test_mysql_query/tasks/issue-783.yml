@@ -1,0 +1,63 @@
+---
+# Test for https://github.com/ansible-collections/community.mysql/issues/783
+# mysql_query must not fail when query results contain non-JSON-serializable
+# types such as decimal.Decimal or datetime.
+
+- vars:
+    mysql_parameters: &mysql_params
+      login_user: '{{ mysql_user }}'
+      login_password: '{{ mysql_password }}'
+      login_host: '{{ mysql_host }}'
+      login_port: '{{ mysql_primary_port }}'
+
+  block:
+
+    - name: issue-783 | Create test database
+      community.mysql.mysql_query:
+        <<: *mysql_params
+        query: 'CREATE DATABASE issue783'
+
+    - name: issue-783 | Create table with DECIMAL and DATETIME columns
+      community.mysql.mysql_query:
+        <<: *mysql_params
+        login_db: issue783
+        query: >
+          CREATE TABLE t (
+            id INT PRIMARY KEY,
+            price DECIMAL(10,2),
+            created_at DATETIME,
+            active_date DATE
+          )
+
+    - name: issue-783 | Insert a row
+      community.mysql.mysql_query:
+        <<: *mysql_params
+        login_db: issue783
+        query: "INSERT INTO t VALUES (1, 18.51, '2024-01-15 10:30:00', '2024-01-15')"
+
+    - name: issue-783 | Query row with DECIMAL and DATETIME columns (must not fail)
+      community.mysql.mysql_query:
+        <<: *mysql_params
+        login_db: issue783
+        query: 'SELECT id, price, created_at, active_date FROM t WHERE id = 1'
+      register: result
+
+    - name: issue-783 | Assert the query succeeded and returned one row
+      assert:
+        that:
+          - result is succeeded
+          - result.query_result[0] | length == 1
+
+    - name: issue-783 | Assert DECIMAL and DATETIME values are returned as strings
+      assert:
+        that:
+          - result.query_result[0][0].price == '18.51'
+          - result.query_result[0][0].created_at == '2024-01-15 10:30:00'
+          - result.query_result[0][0].active_date == '2024-01-15'
+
+  always:
+
+    - name: issue-783 | Drop test database
+      community.mysql.mysql_query:
+        <<: *mysql_params
+        query: 'DROP DATABASE IF EXISTS issue783'

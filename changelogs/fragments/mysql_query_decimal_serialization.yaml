@@ -3,4 +3,4 @@ bugfixes:
     non-JSON-serializable types such as ``decimal.Decimal`` or ``datetime``.
     Results are now round-tripped through ``json.dumps(default=str)`` before
     being returned, coercing unserializable values to their string representation
-    (https://github.com/ansible-collections/community.mysql/pull/782).
+    (https://github.com/ansible-collections/community.mysql/issues/783).
