@@ -135,6 +135,7 @@ execution_time_ms:
     version_added: '3.12.0'
 '''
 
+import json
 import time
 import warnings
 
@@ -286,7 +287,12 @@ def main():
 
         try:
             if not already_exists:
-                query_result.append([dict(row) for row in cursor.fetchall()])
+                rows = [dict(row) for row in cursor.fetchall()]
+                # Round-trip through JSON to coerce non-serializable types
+                # (e.g. decimal.Decimal, datetime) to their string representations,
+                # preventing Ansible's exit_json from failing with
+                # "Value of unknown type: <class 'decimal.Decimal'>".
+                query_result.append(json.loads(json.dumps(rows, default=str)))
 
         except Exception as e:
             if not autocommit:
