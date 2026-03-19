@@ -16,6 +16,15 @@
     - db_engine == 'mysql'
     - db_version is version('8.4', '>=')
 
+- name: "{{ role_name }} | Requirements | Install Linux packages"
+  ansible.builtin.apt:
+    name:
+      - bzip2     # To test mysql_db dump compression
+      - "{{ db_engine }}-client"
+      - python3-debian # Dependency for deb822_repository to work
+    update_cache: true
+    state: present
+
 - name: Add MySQL 8.4 repository
   ansible.builtin.deb822_repository:
     name: mysql
@@ -30,14 +39,6 @@
   when:
     - db_engine == 'mysql'
     - db_version is version('8.4', '>=')
-
-- name: "{{ role_name }} | Requirements | Install Linux packages"
-  ansible.builtin.apt:
-    name:
-      - bzip2     # To test mysql_db dump compression
-      - "{{ db_engine }}-client"
-    update_cache: true
-    state: present
 
 - name: "{{ role_name }} | Requirements | Install Python packages"
   ansible.builtin.pip:
