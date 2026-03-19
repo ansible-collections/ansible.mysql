@@ -16,14 +16,15 @@
     - db_engine == 'mysql'
     - db_version is version('8.4', '>=')
 
-- name: "{{ role_name }} | Requirements | Install Linux packages"
+# Necessary for deb822 to run; when earliest Ansible ver tested against is 2.20, this task can be removed
+# https://docs.ansible.com/projects/ansible/latest/collections/ansible/builtin/deb822_repository_module.html#parameter-install_python_debian
+- name: Install python3-debian for deb822_repository module
   ansible.builtin.apt:
-    name:
-      - bzip2     # To test mysql_db dump compression
-      - "{{ db_engine }}-client"
-      - python3-debian # Dependency for deb822_repository to work
-    update_cache: true
+    name: python3-debian
     state: present
+  when:
+    - db_engine == 'mysql'
+    - db_version is version('8.4', '>=')
 
 - name: Add MySQL 8.4 repository
   ansible.builtin.deb822_repository:
@@ -39,6 +40,15 @@
   when:
     - db_engine == 'mysql'
     - db_version is version('8.4', '>=')
+
+- name: "{{ role_name }} | Requirements | Install Linux packages"
+  ansible.builtin.apt:
+    name:
+      - bzip2     # To test mysql_db dump compression
+      - "{{ db_engine }}-client"
+      - python3-debian # Dependency for deb822_repository to work
+    update_cache: true
+    state: present
 
 - name: "{{ role_name }} | Requirements | Install Python packages"
   ansible.builtin.pip:
