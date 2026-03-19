@@ -17,10 +17,16 @@
     - db_version is version('8.4', '>=')
 
 - name: Add MySQL 8.4 repository
-  ansible.builtin.apt_repository:
-    repo: deb http://repo.mysql.com/apt/ubuntu/ jammy mysql-8.4-lts mysql-tools
+  ansible.builtin.deb822_repository:
+    name: mysql
+    types: deb
+    uris: http://repo.mysql.com/apt/ubuntu
+    suites: jammy
+    components:
+      - mysql-8.4-lts
+      - mysql-tools
+    signed_by: /etc/apt/trusted.gpg.d/mysql.asc
     state: present
-    filename: mysql
   when:
     - db_engine == 'mysql'
     - db_version is version('8.4', '>=')
