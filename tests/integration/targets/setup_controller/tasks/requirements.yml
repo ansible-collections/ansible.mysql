@@ -46,7 +46,6 @@
     name:
       - bzip2     # To test mysql_db dump compression
       - "{{ db_engine }}-client"
-      - python3-debian # Dependency for deb822_repository to work
     update_cache: true
     state: present
 
