@@ -20,6 +20,7 @@ author:
 - Balazs Pocze (@banyek)
 - Andrew Klychkov (@Andersson007)
 - Dennis Urtubia (@dennisurtubia)
+- Sebastian Pfahl (@eryx12o45)
 - Laurent Indermühle (@laurent-indermuehle)
 options:
   mode:
@@ -33,7 +34,9 @@ options:
       C(stopreplica) (STOP REPLICA),
       C(resetprimary) (RESET MASTER) - supported since community.mysql 0.1.0,
       C(resetreplica) (RESET REPLICA),
-      C(resetreplicaall) (RESET REPLICA ALL).
+      C(resetreplicaall) (RESET REPLICA ALL),
+      C(startgroupreplication) (START GROUP_REPLICATION) - supported since community.mysql 3.15.0,
+      C(stopgroupreplication) (STOP GROUP_REPLICATION) - supported since community.mysql 3.15.0.
     type: str
     choices:
     - changeprimary
@@ -45,6 +48,8 @@ options:
     - resetprimary
     - resetreplica
     - resetreplicaall
+    - startgroupreplication
+    - stopgroupreplication
     default: getreplica
   primary_host:
     description:
@@ -191,7 +196,16 @@ options:
     type: bool
     default: false
     version_added: '0.1.0'
-
+  group_replication_user:
+    description:
+    - User for group replication.
+    type: str
+    version_added: '3.15.0'
+  group_replication_password:
+    description:
+    - Password for group replication user.
+    type: str
+    version_added: '3.15.0'
 notes:
    - Compatible with MariaDB or MySQL.
    - If an empty value for the parameter of string type is needed, use an empty string.
@@ -289,6 +303,17 @@ EXAMPLES = r'''
   community.mysql.mysql_replication:
     mode: changeprimary
     fail_on_error: true
+
+- name: Start mysql group replication
+  community.mysql.mysql_replication:
+    mode: startgroupreplication
+    group_replication_user: group_repl_user
+    group_replication_password: group_repl_passwd
+
+- name: Stop mysql group replication
+  community.mysql.mysql_replication:
+    mode: stopgroupreplication
+
 '''
 
 RETURN = r'''
@@ -469,6 +494,38 @@ def changereplication(cursor, chm, channel=''):
     cursor.execute(query)
 
 
+def startgroupreplication(module, cursor, chm, fail_on_error=False, term='GROUP_REPLICATION'):
+    query = 'START %s %s' % (term, ','.join(chm))
+
+    try:
+        executed_queries.append(query)
+        cursor.execute(query)
+        started = True
+    except mysql_driver.Warning as e:
+        started = False
+    except Exception as e:
+        if fail_on_error:
+            module.fail_json(msg="START %s failed: %s" % (term, to_native(e)))
+        started = False
+    return started
+
+
+def stopgroupreplication(module, cursor, fail_on_error=False, term='GROUP_REPLICATION'):
+    query = 'STOP %s' % term
+
+    try:
+        executed_queries.append(query)
+        cursor.execute(query)
+        stopped = True
+    except mysql_driver.Warning as e:
+        stopped = False
+    except Exception as e:
+        if fail_on_error:
+            module.fail_json(msg="STOP %s failed: %s" % (term, to_native(e)))
+        stopped = False
+    return stopped
+
+
 def main():
     argument_spec = mysql_common_argument_spec()
     argument_spec.update(
@@ -481,7 +538,9 @@ def main():
             'resetprimary',
             'resetreplica',
             'resetreplicaall',
-            'changereplication']),
+            'changereplication',
+            'startgroupreplication',
+            'stopgroupreplication']),
         primary_auto_position=dict(type='bool', default=False, aliases=['master_auto_position']),
         primary_host=dict(type='str', aliases=['master_host']),
         primary_user=dict(type='str', aliases=['master_user']),
@@ -505,6 +564,8 @@ def main():
         connection_name=dict(type='str'),
         channel=dict(type='str'),
         fail_on_error=dict(type='bool', default=False),
+        group_replication_user=dict(type='str'),
+        group_replication_password=dict(type='str', no_log=True),
     )
     module = AnsibleModule(
         argument_spec=argument_spec,
@@ -544,6 +605,8 @@ def main():
     connection_name = module.params["connection_name"]
     channel = module.params['channel']
     fail_on_error = module.params['fail_on_error']
+    group_replication_user = module.params['group_replication_user']
+    group_replication_password = module.params['group_replication_password']
 
     if mysql_driver is None:
         module.fail_json(msg=mysql_driver_fail_msg)
@@ -746,6 +809,24 @@ def main():
             module.fail_json(msg='%s. Query == CHANGE REPLICATION SOURCE TO %s' % (to_native(e), chm))
         result['changed'] = True
         module.exit_json(queries=executed_queries, **result)
+    elif mode == "startgroupreplication":
+        chm = []
+        if group_replication_user is not None:
+            chm.append(" USER='%s'" % group_replication_user)
+        if group_replication_password is not None:
+            chm.append(" PASSWORD='%s'" % group_replication_password)
+        started = startgroupreplication(module, cursor, chm, fail_on_error)
+        if started:
+            module.exit_json(msg="Group replication started ", changed=True, queries=executed_queries)
+        else:
+            module.exit_json(msg="Group replication already started (Or cannot be started)", changed=False,
+                             ueries=executed_queries)
+    elif mode == "stopgroupreplication":
+        stopped = stopgroupreplication(module, cursor, channel, fail_on_error)
+        if stopped:
+            module.exit_json(msg="Group replication stopped", changed=True, queries=executed_queries)
+        else:
+            module.exit_json(msg="Group replication already stopped", changed=False, queries=executed_queries)
 
     warnings.simplefilter("ignore")
 

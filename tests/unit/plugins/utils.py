@@ -17,3 +17,27 @@ class dummy_cursor_class():
 
         elif self.ret_val_type == 'list':
             return [self.output]
+
+
+# Define MockWarning at module level to ensure it's a proper exception class
+class MockWarning(Exception):
+    pass
+
+
+class MockCursor:
+    # Set the Warning class at the class level
+    Warning = MockWarning
+
+    def __init__(self, status="ONLINE"):
+        self.status = status
+        self.executed_queries = []
+
+    def execute(self, query):
+        self.executed_queries.append(query)
+        if self.status == "ERROR":
+            raise MockWarning("Mocked execution error")
+
+    def fetchone(self):
+        if len(self.executed_queries) > 0 and "group_replication_status" in self.executed_queries[-1]:
+            return ["group_replication_status", self.status]
+        return None

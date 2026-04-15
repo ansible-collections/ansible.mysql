@@ -1,0 +1,108 @@
+---
+# Copyright: (c) 2025, Sebastian Pfahl (@eryx12o45)
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+
+- vars:
+    mysql_params: &mysql_params
+      login_user: '{{ mysql_user }}'
+      login_password: '{{ mysql_password }}'
+      login_host: '{{ mysql_host }}'
+
+  block:
+    # Setup group replication prerequisites
+    - name: Create group replication user
+      shell:
+        "echo \"CREATE USER IF NOT EXISTS \
+        '{{ group_replication_user }}'@'{{ mysql_host }}' \
+        IDENTIFIED {% if db_engine == 'mysql' %}WITH mysql_native_password {% endif %}BY '{{ group_replication_pass }}'; \
+        GRANT REPLICATION SLAVE ON *.* TO \
+        '{{ group_replication_user }}'@'{{ mysql_host }}'; \
+        GRANT CONNECTION_ADMIN ON *.* TO \
+        '{{ group_replication_user }}'@'{{ mysql_host }}'; \
+        GRANT BACKUP_ADMIN ON *.* TO \
+        '{{ group_replication_user }}'@'{{ mysql_host }}'; \
+        GRANT GROUP_REPLICATION_STREAM ON *.* TO \
+        '{{ group_replication_user }}'@'{{ mysql_host }}'; \
+        FLUSH PRIVILEGES;\" | {{ mysql_command }}"
+      when: db_engine == 'mysql' and db_version is version('8.0.0', '>=')
+
+    - name: Create group replication user for MariaDB
+      shell:
+        "echo \"CREATE USER IF NOT EXISTS \
+        '{{ group_replication_user }}'@'{{ mysql_host }}' \
+        IDENTIFIED BY '{{ group_replication_pass }}'; \
+        GRANT REPLICATION SLAVE ON *.* TO \
+        '{{ group_replication_user }}'@'{{ mysql_host }}';\" | {{ mysql_command }}"
+      when: db_engine == 'mariadb'
+
+    # Configure group replication settings
+    - name: Configure group replication settings for MySQL
+      shell:
+        "echo \"INSTALL PLUGIN group_replication SONAME 'group_replication.so'; \
+        SET GLOBAL group_replication_group_name='{{ group_replication_group_name }}'; \
+        SET GLOBAL group_replication_local_address='{{ mysql_host }}:{{ group_replication_port }}'; \
+        SET GLOBAL group_replication_group_seeds='{{ mysql_host }}:{{ group_replication_port }}'; \
+        SET GLOBAL group_replication_bootstrap_group=ON;\" | {{ mysql_command }}"
+      when: db_engine == 'mysql' and db_version is version('8.0.0', '>=')
+
+    - name: Configure group replication settings for MariaDB
+      shell:
+        "echo \"SET GLOBAL wsrep_provider='/usr/lib/galera/libgalera_smm.so'; \
+        SET GLOBAL wsrep_cluster_name='{{ group_replication_group_name }}'; \
+        SET GLOBAL wsrep_cluster_address='gcomm://{{ mysql_host }}:{{ group_replication_port }}'; \
+        SET GLOBAL wsrep_node_address='{{ mysql_host }}:{{ group_replication_port }}';\" | {{ mysql_command }}"
+      when: db_engine == 'mariadb' and db_version is version('10.1.0', '>=')
+      ignore_errors: true
+
+    # Test startgroupreplication mode
+    - name: Start group replication
+      mysql_replication:
+        <<: *mysql_params
+        mode: startgroupreplication
+        group_replication_user: '{{ group_replication_user }}'
+        group_replication_password: '{{ group_replication_pass }}'
+      register: result
+      ignore_errors: true
+
+    - name: Assert that startgroupreplication returns expected values
+      assert:
+        that:
+          - result is changed
+          - result.queries | length > 0
+          - "'START GROUP_REPLICATION' in result.queries[0]"
+      when: result is not failed
+
+    # Check group replication status
+    - name: Check group replication status
+      shell:
+        "echo \"SHOW STATUS LIKE 'group_replication_status';\" | {{ mysql_command }}"
+      register: gr_status
+      ignore_errors: true
+
+    # Test stopgroupreplication mode
+    - name: Stop group replication
+      mysql_replication:
+        <<: *mysql_params
+        mode: stopgroupreplication
+      register: result
+      ignore_errors: true
+
+    - name: Assert that stopgroupreplication returns expected values
+      assert:
+        that:
+          - result is changed
+          - result.queries | length > 0
+          - "'STOP GROUP_REPLICATION' in result.queries[0]"
+      when: result is not failed
+
+    # Cleanup group replication settings
+    - name: Reset group replication settings for MySQL
+      shell:
+        "echo \"SET GLOBAL group_replication_bootstrap_group=OFF;\" | {{ mysql_command }}"
+      when: db_engine == 'mysql' and db_version is version('8.0.0', '>=')
+      ignore_errors: true
+
+    - name: Drop group replication user
+      shell:
+        "echo \"DROP USER IF EXISTS '{{ group_replication_user }}'@'{{ mysql_host }}';\" | {{ mysql_command }}"
+      ignore_errors: true

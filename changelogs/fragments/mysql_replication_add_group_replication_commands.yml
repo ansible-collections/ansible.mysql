@@ -1,0 +1,2 @@
+minor_changes:
+    - mysql_replication - add ``startgroupreplication`` and ``stopgroupreplication`` options (https://github.com/ansible-collections/community.mysql/pull/647).

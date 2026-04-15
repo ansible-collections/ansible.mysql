@@ -35,3 +35,9 @@
   when:
     - db_engine == 'mysql'
     - db_version is version('8.0.23', '>=')
+
+# Tests of group replication:
+- import_tasks: mysql_replication_group.yml
+  when:
+    - (db_engine == 'mysql' and db_version is version('8.0.0', '>=')) or
+      (db_engine == 'mariadb' and db_version is version('10.1.0', '>='))

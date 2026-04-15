@@ -15,3 +15,11 @@ test_channel: test_channel-1
 
 user_name_1: 'db_user1'
 user_password_1: 'gadfFDSdtTU^Sdfuj'
+
+enable_group_replication: true
+group_replication_group_name: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+group_replication_port: 33061
+group_replication_user: 'group_repl_user'
+group_replication_pass: 'group_repl_pass'
+group_replication_local_address: "{{ mysql_host }}:{{ group_replication_port }}"
+group_replication_group_seeds: "{{ mysql_host }}:{{ group_replication_port }}"
