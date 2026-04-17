@@ -1,0 +1,24 @@
+---
+name: Galaxy importer
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'
+
+jobs:
+  galaxy-importer:
+    name: Build and import check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out collection
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Run Galaxy importer
+        uses: ansible-community/antsibull-nox@stable-1
+        with:
+          sessions: build-import-check
