@@ -1,4 +1,6 @@
 ---
+# This test validate that the collection can be built and imported in Galaxy.
+# It catches error before they are sent to Zuul, letting us fix mistakes prior to a release.
 name: Galaxy importer
 
 on:
