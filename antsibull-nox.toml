@@ -3,3 +3,12 @@
 [sessions.ansible_lint]
 
 [sessions.build_import_check]
+
+[sessions.ansible_test_sanity]
+default = true
+min_version = "2.17"
+include_devel = true
+
+[sessions.ansible_test_units]
+min_version = "2.17"
+include_devel = true
