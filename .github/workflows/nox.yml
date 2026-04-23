@@ -56,6 +56,10 @@ jobs:
   unit:
     name: Nox - Unit
     runs-on: ubuntu-latest
+    strategy:
+      # As soon as the first unit test fails,
+      # cancel the others to free up the CI queue
+      fail-fast: true
     steps:
       - name: Check out collection
         uses: actions/checkout@v5

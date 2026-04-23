@@ -16,26 +16,6 @@ on:  # yamllint disable-line rule:truthy
   workflow_dispatch:
 
 jobs:
-  sanity:
-    name: "Sanity (Ⓐ${{ matrix.ansible }})"
-    runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        ansible:
-          - stable-2.17
-          - stable-2.18
-          - stable-2.19
-          - stable-2.20
-          - devel
-    steps:
-      # https://github.com/ansible-community/ansible-test-gh-action
-      - name: Perform sanity testing
-        uses: ansible-community/ansible-test-gh-action@release/v1
-        with:
-          ansible-core-version: ${{ matrix.ansible }}
-          testing-type: sanity
-          pull-request-change-detection: true
-
   # Use this to chose which version of Python vs Ansible to test:
   # https://docs.ansible.com/ansible/latest/reference_appendices/release_and_maintenance.html#ansible-core-control-node-python-support
   integration:
@@ -234,61 +214,3 @@ jobs:
             > tests/integration/ansible
           testing-type: integration
           integration-retry-on-error: false
-
-  units:
-    runs-on: ubuntu-22.04
-    name: Units (Ⓐ${{ matrix.ansible }}, Python${{ matrix.python }})
-    strategy:
-      # As soon as the first unit test fails,
-      # cancel the others to free up the CI queue
-      fail-fast: true
-      matrix:
-        ansible:
-          - stable-2.17
-          - stable-2.18
-          - stable-2.19
-          - stable-2.20
-          - devel
-        python:
-          - '3.8'
-          - '3.9'
-          - '3.10'
-          - '3.11'
-        exclude:
-          - python: '3.8'
-            ansible: stable-2.17
-
-          - python: '3.8'
-            ansible: stable-2.20
-
-          - python: '3.8'
-            ansible: devel
-
-          - python: '3.8'
-            ansible: stable-2.19
-
-          - python: '3.9'
-            ansible: stable-2.17
-
-          - python: '3.9'
-            ansible: stable-2.20
-
-          - python: '3.9'
-            ansible: devel
-
-          - python: '3.10'
-            ansible: stable-2.17
-
-          - python: '3.11'
-            ansible: stable-2.17
-    steps:
-      - name: >-
-          Perform unit testing against
-          Ansible version ${{ matrix.ansible }} and
-          python version ${{ matrix.python }}
-        uses: ansible-community/ansible-test-gh-action@release/v1
-        with:
-          ansible-core-version: ${{ matrix.ansible }}
-          target-python-version: ${{ matrix.python }}
-          testing-type: units
-          pull-request-change-detection: true
