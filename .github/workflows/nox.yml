@@ -223,6 +223,7 @@ jobs:
           --health-retries 6
 
     steps:
+      - uses: actions/checkout@5
 
       # No need to check for service health. GitHub Action took care of it.
 
