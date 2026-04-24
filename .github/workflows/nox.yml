@@ -270,5 +270,13 @@ jobs:
       - name: Run integration testing
         uses: ansible-community/antsibull-nox@stable-1
         with:
+          extra-python-versions: | # testing to see if nox can install python versions for integration tests
+            3.7
+            3.8
+            3.9
+            3.10
+            3.11
+            3.12
+            3.13
           sessions: ansible-test-integration-${{ matrix.ansible }}
           extra-args: --retry-on-error false
