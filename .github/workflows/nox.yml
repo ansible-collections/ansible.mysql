@@ -10,7 +10,7 @@ on:
 
 jobs:
   ansible-lint:
-    name: Nox - Ansible Lint
+    name: Ansible Lint
     runs-on: ubuntu-latest
     steps:
       - name: Check out collection
@@ -26,7 +26,7 @@ jobs:
 # This test validate that the collection can be built and imported in Galaxy.
 # It catches error before they are sent to Zuul, letting us fix mistakes prior to a release.
   galaxy-importer:
-    name: Nox - Galaxy Import
+    name: Galaxy Import
     runs-on: ubuntu-latest
     steps:
       - name: Check out collection
@@ -87,3 +87,184 @@ jobs:
         uses: ansible-community/antsibull-nox@stable-1
         with:
           sessions: ansible-test-units-${{ matrix.ansible }}
+
+  integration:
+    name: "Integration (${{ matrix.ansible }}, DB: ${{ matrix.db_engine_name }} ${{ matrix.db_engine_version }}, connector: ${{ matrix.connector_name }} ${{ matrix.connector_version }})"
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ansible:
+          - '2.17'
+          - '2.18'
+          - '2.19'
+          - '2.20'
+          - '2.21'
+          - devel
+        db_engine_name:
+          - mysql
+          - mariadb
+        db_engine_version:
+          - '8.0.38'
+          - '8.4.1'
+          - '10.11.8'
+          - '11.8.3'
+        connector_name:
+          - pymysql
+        connector_version:
+          - '0.9.3'
+          - '1.0.2'
+          - '1.1.1'
+
+        include:
+
+          # RHEL8 context
+          - connector_name: pymysql
+            connector_version: '0.10.1'
+            ansible: '2.16'
+            db_engine_name: mariadb
+            db_engine_version: '10.11.8'
+
+            # RHEL9 context
+            # - connector_name: pymysql
+            #   connector_version: '1.1.1'
+            #   ansible: stable-2.17
+            #   db_engine_name: mariadb
+            #   db_engine_version: '10.11.8'
+            # This tests is already included in the matrix, no need repeating
+
+        exclude:
+
+          - db_engine_name: mysql
+            db_engine_version: '10.11.8'
+
+          - db_engine_name: mysql
+            db_engine_version: '11.8.3'
+
+          - db_engine_name: mariadb
+            db_engine_version: '8.0.38'
+
+          - db_engine_name: mariadb
+            db_engine_version: '8.4.1'
+
+          - db_engine_version: '8.0.38'
+            ansible: '2.17'
+
+          - db_engine_version: '10.11.8'
+            ansible: '2.17'
+
+          - db_engine_version: '8.0.38'
+            ansible: devel
+
+          - db_engine_version: '10.11.8'
+            ansible: devel
+
+          - db_engine_version: '8.4.1'
+            connector_version: '2.0.1'
+
+          - db_engine_version: '8.4.1'
+            connector_version: '2.0.3'
+
+          - db_engine_version: '10.11.8'
+            connector_version: '2.0.1'
+
+          - db_engine_version: '10.11.8'
+            connector_version: '2.0.1'
+
+          - db_engine_version: '10.11.8'
+            ansible: '2.15'
+
+          - db_engine_version: '8.4.1'
+            ansible: '2.15'
+
+    services:
+      db_primary:
+        image: docker.io/library/${{ matrix.db_engine_name }}:${{ matrix.db_engine_version }}
+        env:
+          MARIADB_ROOT_PASSWORD: msandbox
+          MYSQL_ROOT_PASSWORD: msandbox
+        ports:
+          - 3307:3306
+        # We write our own health-cmd because the mariadb container does not
+        # provide a healthcheck
+        options: >-
+          --health-cmd "${{ matrix.db_engine_name == 'mysql' && 'mysqladmin' || 'mariadb-admin' }} ping -P 3306 -pmsandbox |grep alive || exit 1"
+          --health-start-period 10s
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 6
+
+      db_replica1:
+        image: docker.io/library/${{ matrix.db_engine_name }}:${{ matrix.db_engine_version }}
+        env:
+          MARIADB_ROOT_PASSWORD: msandbox
+          MYSQL_ROOT_PASSWORD: msandbox
+        ports:
+          - 3308:3306
+        options: >-
+          --health-cmd "${{ matrix.db_engine_name == 'mysql' && 'mysqladmin' || 'mariadb-admin' }} ping -P 3306 -pmsandbox |grep alive || exit 1"
+          --health-start-period 10s
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 6
+
+      db_replica2:
+        image: docker.io/library/${{ matrix.db_engine_name }}:${{ matrix.db_engine_version }}
+        env:
+          MARIADB_ROOT_PASSWORD: msandbox
+          MYSQL_ROOT_PASSWORD: msandbox
+        ports:
+          - 3309:3306
+        options: >-
+          --health-cmd "${{ matrix.db_engine_name == 'mysql' && 'mysqladmin' || 'mariadb-admin' }} ping -P 3306 -pmsandbox |grep alive || exit 1"
+          --health-start-period 10s
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 6
+
+    steps:
+
+      # No need to check for service health. GitHub Action took care of it.
+
+      - name: Restart MySQL server with settings for replication
+        run: |
+          db_ver="${{ matrix.db_engine_version }}"
+          maj="${db_ver%.*.*}"
+          maj_min="${db_ver%.*}"
+          min="${maj_min#*.}"
+          if [[ "${{ matrix.db_engine_name }}" == "mysql" && "$maj" -eq 8 && "$min" -ge 2 ]]; then
+            prima_conf='[mysqld]\\nserver-id=1\\nlog-bin=/var/lib/mysql/primary-bin\\nmysql-native-password=1'
+            repl1_conf='[mysqld]\\nserver-id=2\\nlog-bin=/var/lib/mysql/replica1-bin\\nmysql-native-password=1'
+            repl2_conf='[mysqld]\\nserver-id=3\\nlog-bin=/var/lib/mysql/replica2-bin\\nmysql-native-password=1'
+          else
+            prima_conf='[mysqld]\\nserver-id=1\\nlog-bin=/var/lib/mysql/primary-bin'
+            repl1_conf='[mysqld]\\nserver-id=2\\nlog-bin=/var/lib/mysql/replica1-bin'
+            repl2_conf='[mysqld]\\nserver-id=3\\nlog-bin=/var/lib/mysql/replica2-bin'
+          fi
+          docker exec -e cnf=$prima_conf ${{ job.services.db_primary.id }} bash -c 'echo -e ${cnf//\\n/\n} > /etc/mysql/conf.d/replication.cnf'
+          docker exec -e cnf=$repl1_conf ${{ job.services.db_replica1.id }} bash -c 'echo -e ${cnf//\\n/\n} > /etc/mysql/conf.d/replication.cnf'
+          docker exec -e cnf=$repl2_conf ${{ job.services.db_replica2.id }} bash -c 'echo -e ${cnf//\\n/\n} > /etc/mysql/conf.d/replication.cnf'
+          docker restart -t 30 ${{ job.services.db_primary.id }}
+          docker restart -t 30 ${{ job.services.db_replica1.id }}
+          docker restart -t 30 ${{ job.services.db_replica2.id }}
+
+      - name: Wait for the primary to be healthy
+        run: >
+          while ! /usr/bin/docker inspect
+          --format="{{if .Config.Healthcheck}}{{print .State.Health.Status}}{{end}}"
+          ${{ job.services.db_primary.id }}
+          | grep healthy && [[ "$SECONDS" -lt 120 ]]; do sleep 1; done
+
+      - name: Set metadata for integration testing
+        run: |
+          echo -n "${{ matrix.db_engine_name }}" > tests/integration/db_engine_name;
+          echo -n "${{ matrix.db_engine_version }}" > tests/integration/db_engine_version;
+          echo -n "${{ matrix.connector_name }}" > tests/integration/connector_name;
+          echo -n "${{ matrix.connector_version }}" > tests/integration/connector_version;
+          echo -n "${{ matrix.ansible }}" > tests/integration/ansible
+      
+      - name: Run integration testing
+        uses: ansible-community/antsibull-nox@stable-1
+        with:
+          sessions: ansible-test-integration-${{ matrix.ansible }}
+          extra-args: --retry-on-error false
