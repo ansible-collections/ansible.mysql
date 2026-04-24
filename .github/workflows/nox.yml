@@ -279,4 +279,3 @@ jobs:
             3.12
             3.13
           sessions: ansible-test-integration-${{ matrix.ansible }}
-          extra-args: --retry-on-error false
