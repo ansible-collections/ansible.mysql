@@ -223,7 +223,10 @@ jobs:
           --health-retries 6
 
     steps:
-      - uses: actions/checkout@5
+      - name: Check out collection
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       # No need to check for service health. GitHub Action took care of it.
 
