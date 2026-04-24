@@ -6,11 +6,12 @@ on:  # yamllint disable-line rule:truthy
       - 'plugins/**'
       - 'tests/**'
       - '.github/workflows/ansible-test-plugins.yml'
-  pull_request:
-    paths:
-      - 'plugins/**'
-      - 'tests/**'
-      - '.github/workflows/ansible-test-plugins.yml'
+# disabled for now to test without running this workflow
+#  pull_request:
+#    paths:
+#      - 'plugins/**'
+#      - 'tests/**'
+#      - '.github/workflows/ansible-test-plugins.yml'
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch:

@@ -10,3 +10,6 @@ include_devel = true
 
 [sessions.ansible_test_units]
 include_devel = true
+
+[sessions.ansible_test_integration_w_default_container]
+
