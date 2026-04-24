@@ -44,12 +44,7 @@
     connector_version: "{{ connector_version_lookup.strip() }}"
     db_engine: "{{ db_engine_name_lookup.strip() }}"
     db_version: "{{ db_engine_version_lookup.strip() }}"
-    test_ansible_version: >-
-      {%- if ansible_version_lookup == 'devel' -%}
-      {{ ansible_version_lookup }}
-      {%- else -%}
-      {{ ansible_version_lookup.split('-')[1].strip() }}
-      {%- endif -%}
+    test_ansible_version: "{{ ansible_version_lookup.strip() }}"
     mysql_command: >-
       mysql
       -h{{ gateway_addr }}
