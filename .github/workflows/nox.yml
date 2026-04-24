@@ -60,7 +60,7 @@ jobs:
       - name: Run sanity tests
         uses: ansible-community/antsibull-nox@stable-1
         with:
-          sessions: ansible-test-sanity
+          sessions: ansible-test-sanity-${{ matrix.ansible }}
 
   unit:
     name: Unit - ${{ matrix.ansible }}
