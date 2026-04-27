@@ -33,10 +33,11 @@
         '/root/ansible_collections/community/mysql/tests/integration/db_engine_version'
       ) }}
     ansible_version_lookup: >-
-      {{ lookup(
-        'file',
-        '/root/ansible_collections/community/mysql/tests/integration/ansible'
-      ) }}
+      {%- if ansible_version_lookup == 'devel' -%}
+      {{ ansible_version_lookup }}
+      {%- else -%}
+      {{ ansible_version_lookup.split('-')[1].strip() }}
+      {%- endif -%}
 
 - name: "{{ role_name }} | Setvars | Set Fact using above facts"
   ansible.builtin.set_fact:
