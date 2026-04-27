@@ -6,7 +6,10 @@
 
 [sessions.ansible_test_sanity]
 default = true
+min_version = "2.17"
 include_devel = true
 
 [sessions.ansible_test_units]
+default = true
+min_version = "2.17"
 include_devel = true
