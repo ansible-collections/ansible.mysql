@@ -1,5 +1,5 @@
 # MySQL and MariaDB collection for Ansible
-[![Plugins CI](https://github.com/ansible-collections/ansible.mysql/workflows/Plugins%20CI/badge.svg?event=push)](https://github.com/ansible-collections/ansible.mysql/actions?query=workflow%3A"Plugins+CI") [![Codecov](https://img.shields.io/codecov/c/github/ansible-collections/ansible.mysql)](https://codecov.io/gh/ansible-collections/ansible.mysql) [![Discuss on Matrix at #mysql:ansible.com](https://img.shields.io/matrix/mysql:ansible.com.svg?server_fqdn=ansible-accounts.ems.host&label=Discuss%20on%20Matrix%20at%20%23mysql:ansible.com&logo=matrix)](https://matrix.to/#/#mysql:ansible.com)
+[![Plugins CI](https://github.com/ansible-collections/ansible.mysql/actions/workflows/ansible-test-plugins.yml/badge.svg?event=push)](https://github.com/ansible-collections/ansible.mysql/actions?query=workflow%3A"Plugins+CI") [![Codecov](https://img.shields.io/codecov/c/github/ansible-collections/ansible.mysql)](https://codecov.io/gh/ansible-collections/ansible.mysql) [![Discuss on Matrix at #mysql:ansible.com](https://img.shields.io/matrix/mysql:ansible.com.svg?server_fqdn=matrix.org&label=Discuss%20on%20Matrix%20at%20%23mysql:ansible.com&logo=matrix)](https://matrix.to/#/#mysql:ansible.com)
 
 This collection is a part of the Ansible package.
 
