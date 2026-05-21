@@ -1,0 +1,4 @@
+minor_changes:
+  - mysql_tls - new module to configure server-side TLS settings for MySQL 8.0+,
+    including certificate paths, secure transport enforcement, TLS version control,
+    and hot-reload support (https://github.com/ansible-collections/ansible.mysql/pull/XXXX).

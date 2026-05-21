@@ -1,0 +1,5 @@
+minor_changes:
+  - mysql_audit - new module to manage MySQL audit log plugin, filters,
+    and user assignments (https://github.com/ansible-collections/ansible.mysql/pull/XXXX).
+  - mysql_audit_info - new module to gather information about MySQL audit
+    log configuration (https://github.com/ansible-collections/ansible.mysql/pull/XXXX).
