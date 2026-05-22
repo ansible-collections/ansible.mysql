@@ -1,0 +1,162 @@
+# test code for the mysql_tls module
+
+# This file is part of Ansible
+#
+# Ansible is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Ansible is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+
+# ============================================================
+# Test mysql_tls module
+# ============================================================
+
+- vars:
+    mysql_parameters: &mysql_params
+      login_user: '{{ mysql_user }}'
+      login_password: '{{ mysql_password }}'
+      login_host: '{{ mysql_host }}'
+      login_port: '{{ mysql_primary_port }}'
+
+  block:
+
+    # ============================================================
+    # Test: Read current TLS state (no changes, state=present with no params)
+    # ============================================================
+    - name: Get current TLS settings (no changes expected)
+      mysql_tls:
+        <<: *mysql_params
+        state: present
+      register: result
+
+    - name: Assert no change when no params specified
+      assert:
+        that:
+          - result is not changed
+
+    # ============================================================
+    # Test: Set require_secure_transport in check_mode
+    # ============================================================
+    - name: Set require_secure_transport in check_mode
+      mysql_tls:
+        <<: *mysql_params
+        require_secure_transport: false
+      check_mode: true
+      register: result_check
+
+    - name: Verify check_mode returns queries
+      assert:
+        that:
+          - result_check is not failed
+
+    # ============================================================
+    # Test: Set tls_version
+    # ============================================================
+    - name: Set tls_version to TLSv1.2,TLSv1.3
+      mysql_tls:
+        <<: *mysql_params
+        tls_version: 'TLSv1.2,TLSv1.3'
+      register: result_tls_ver
+
+    # Verify by reading the variable directly
+    - name: Read tls_version variable
+      mysql_variables:
+        <<: *mysql_params
+        variable: tls_version
+      register: tls_ver_value
+
+    - name: Assert tls_version was set
+      assert:
+        that:
+          - tls_ver_value.msg == 'TLSv1.2,TLSv1.3'
+
+    # ============================================================
+    # Test: Idempotency - set same tls_version again
+    # ============================================================
+    - name: Set tls_version again (idempotency)
+      mysql_tls:
+        <<: *mysql_params
+        tls_version: 'TLSv1.2,TLSv1.3'
+      register: result_idem
+
+    - name: Assert no change on idempotent run
+      assert:
+        that:
+          - result_idem is not changed
+
+    # ============================================================
+    # Test: Set require_secure_transport to ON
+    # ============================================================
+    - name: Enable require_secure_transport
+      mysql_tls:
+        <<: *mysql_params
+        require_secure_transport: true
+      register: result_secure
+
+    - name: Read require_secure_transport variable
+      mysql_variables:
+        <<: *mysql_params
+        variable: require_secure_transport
+      register: secure_value
+
+    - name: Assert require_secure_transport is ON
+      assert:
+        that:
+          - secure_value.msg == 'ON'
+
+    # ============================================================
+    # Test: Reset to defaults with state=absent
+    # ============================================================
+    - name: Reset TLS to defaults
+      mysql_tls:
+        <<: *mysql_params
+        state: absent
+      register: result_absent
+
+    - name: Read require_secure_transport after reset
+      mysql_variables:
+        <<: *mysql_params
+        variable: require_secure_transport
+      register: secure_after_reset
+
+    - name: Assert require_secure_transport is OFF after reset
+      assert:
+        that:
+          - secure_after_reset.msg == 'OFF'
+
+    # ============================================================
+    # Test: state=absent idempotency
+    # ============================================================
+    - name: Reset TLS to defaults again (idempotency)
+      mysql_tls:
+        <<: *mysql_params
+        state: absent
+      register: result_absent_idem
+
+    - name: Assert no change on second absent run
+      assert:
+        that:
+          - result_absent_idem is not changed
+
+    # ============================================================
+    # Test: reload option
+    # ============================================================
+    - name: Reload TLS context
+      mysql_tls:
+        <<: *mysql_params
+        reload: true
+      register: result_reload
+
+    - name: Assert reload caused a change
+      assert:
+        that:
+          - result_reload is changed
+          - "'ALTER INSTANCE RELOAD TLS' in result_reload.queries"
