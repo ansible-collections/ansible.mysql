@@ -1,0 +1,199 @@
+# test code for the mysql_audit and mysql_audit_info modules
+#
+# Copyright: (c) 2026, Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+
+- vars:
+    mysql_parameters: &mysql_params
+      login_user: '{{ mysql_user }}'
+      login_password: '{{ mysql_password }}'
+      login_host: '{{ mysql_host }}'
+      login_port: '{{ mysql_primary_port }}'
+
+  block:
+
+    # ============================================================
+    # Test: gather info when audit plugin is NOT installed
+    # ============================================================
+
+    - name: Gather audit info before install
+      mysql_audit_info:
+        <<: *mysql_params
+      register: audit_info_before
+
+    - name: Assert plugin is not installed initially
+      assert:
+        that:
+          - audit_info_before.plugin_installed == false
+          - audit_info_before.filters == {}
+          - audit_info_before.user_assignments == {}
+
+    # ============================================================
+    # Test: install audit plugin
+    # ============================================================
+
+    - name: Install audit plugin (check mode)
+      mysql_audit:
+        <<: *mysql_params
+        state: present
+      check_mode: true
+      register: install_check
+
+    - name: Assert check mode reports changed
+      assert:
+        that:
+          - install_check is changed
+
+    - name: Install audit plugin
+      mysql_audit:
+        <<: *mysql_params
+        state: present
+      register: install_result
+
+    - name: Assert plugin was installed
+      assert:
+        that:
+          - install_result is changed
+          - install_result.queries | length > 0
+
+    - name: Install audit plugin again (idempotency)
+      mysql_audit:
+        <<: *mysql_params
+        state: present
+      register: install_idem
+
+    - name: Assert idempotent install
+      assert:
+        that:
+          - install_idem is not changed
+
+    # ============================================================
+    # Test: verify info module after install
+    # ============================================================
+
+    - name: Gather audit info after install
+      mysql_audit_info:
+        <<: *mysql_params
+      register: audit_info_after
+
+    - name: Assert plugin is installed
+      assert:
+        that:
+          - audit_info_after.plugin_installed == true
+          - audit_info_after.log_format is defined
+
+    # ============================================================
+    # Test: set log format
+    # ============================================================
+
+    - name: Set log format to JSON
+      mysql_audit:
+        <<: *mysql_params
+        state: present
+        log_format: JSON
+      register: format_result
+
+    - name: Gather info to verify format
+      mysql_audit_info:
+        <<: *mysql_params
+      register: format_info
+
+    - name: Assert log format
+      assert:
+        that:
+          - format_info.log_format == 'JSON'
+
+    # ============================================================
+    # Test: create audit filter and assign to user
+    # ============================================================
+
+    - name: Create audit filter
+      mysql_audit:
+        <<: *mysql_params
+        state: present
+        filter_name: log_all
+        filter_rule:
+          filter:
+            log: true
+        users:
+          - '{{ mysql_user }}@{{ mysql_host }}'
+      register: filter_result
+
+    - name: Assert filter was created
+      assert:
+        that:
+          - filter_result is changed
+
+    - name: Gather info to verify filter
+      mysql_audit_info:
+        <<: *mysql_params
+      register: filter_info
+
+    - name: Assert filter exists in info
+      assert:
+        that:
+          - "'log_all' in filter_info.filters"
+
+    # ============================================================
+    # Test: rotate audit log
+    # ============================================================
+
+    - name: Rotate audit log
+      mysql_audit:
+        <<: *mysql_params
+        state: present
+        rotate: true
+      register: rotate_result
+
+    - name: Assert rotation was triggered
+      assert:
+        that:
+          - rotate_result is changed
+
+    # ============================================================
+    # Test: uninstall audit plugin
+    # ============================================================
+
+    - name: Uninstall audit plugin (check mode)
+      mysql_audit:
+        <<: *mysql_params
+        state: absent
+      check_mode: true
+      register: uninstall_check
+
+    - name: Assert check mode reports changed for uninstall
+      assert:
+        that:
+          - uninstall_check is changed
+
+    - name: Uninstall audit plugin
+      mysql_audit:
+        <<: *mysql_params
+        state: absent
+      register: uninstall_result
+
+    - name: Assert plugin was uninstalled
+      assert:
+        that:
+          - uninstall_result is changed
+
+    - name: Uninstall audit plugin again (idempotency)
+      mysql_audit:
+        <<: *mysql_params
+        state: absent
+      register: uninstall_idem
+
+    - name: Assert idempotent uninstall
+      assert:
+        that:
+          - uninstall_idem is not changed
+
+    - name: Gather info after uninstall
+      mysql_audit_info:
+        <<: *mysql_params
+      register: audit_info_final
+
+    - name: Assert plugin is no longer installed
+      assert:
+        that:
+          - audit_info_final.plugin_installed == false
