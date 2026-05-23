@@ -3,6 +3,10 @@
 # Copyright: (c) 2026, Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
+# ============================================================
+# MariaDB: verify modules fail with a clear error message
+# ============================================================
+
 - vars:
     mysql_parameters: &mysql_params
       login_user: '{{ mysql_user }}'
@@ -10,6 +14,48 @@
       login_host: '{{ mysql_host }}'
       login_port: '{{ mysql_primary_port }}'
 
+  when: db_engine == 'mariadb'
+  block:
+
+    - name: Verify mysql_audit fails on MariaDB
+      mysql_audit:
+        <<: *mysql_params
+        state: present
+      register: mariadb_audit_result
+      failed_when: false
+
+    - name: Assert mysql_audit rejects MariaDB with clear message
+      assert:
+        that:
+          - mariadb_audit_result is failed
+          - "'does not support MariaDB' in mariadb_audit_result.msg"
+          - "'server_audit' in mariadb_audit_result.msg"
+
+    - name: Verify mysql_audit_info fails on MariaDB
+      mysql_audit_info:
+        <<: *mysql_params
+      register: mariadb_info_result
+      failed_when: false
+
+    - name: Assert mysql_audit_info rejects MariaDB with clear message
+      assert:
+        that:
+          - mariadb_info_result is failed
+          - "'does not support MariaDB' in mariadb_info_result.msg"
+          - "'server_audit' in mariadb_info_result.msg"
+
+# ============================================================
+# MySQL: full audit plugin test suite
+# ============================================================
+
+- vars:
+    mysql_parameters: &mysql_params_full
+      login_user: '{{ mysql_user }}'
+      login_password: '{{ mysql_password }}'
+      login_host: '{{ mysql_host }}'
+      login_port: '{{ mysql_primary_port }}'
+
+  when: db_engine == 'mysql'
   block:
 
     # ============================================================
@@ -18,7 +64,7 @@
 
     - name: Gather audit info before install
       mysql_audit_info:
-        <<: *mysql_params
+        <<: *mysql_params_full
       register: audit_info_before
 
     - name: Assert plugin is not installed initially
@@ -34,7 +80,7 @@
 
     - name: Install audit plugin (check mode)
       mysql_audit:
-        <<: *mysql_params
+        <<: *mysql_params_full
         state: present
       check_mode: true
       register: install_check
@@ -46,7 +92,7 @@
 
     - name: Install audit plugin
       mysql_audit:
-        <<: *mysql_params
+        <<: *mysql_params_full
         state: present
       register: install_result
 
@@ -58,7 +104,7 @@
 
     - name: Install audit plugin again (idempotency)
       mysql_audit:
-        <<: *mysql_params
+        <<: *mysql_params_full
         state: present
       register: install_idem
 
@@ -73,7 +119,7 @@
 
     - name: Gather audit info after install
       mysql_audit_info:
-        <<: *mysql_params
+        <<: *mysql_params_full
       register: audit_info_after
 
     - name: Assert plugin is installed
@@ -88,14 +134,14 @@
 
     - name: Set log format to JSON
       mysql_audit:
-        <<: *mysql_params
+        <<: *mysql_params_full
         state: present
         log_format: JSON
       register: format_result
 
     - name: Gather info to verify format
       mysql_audit_info:
-        <<: *mysql_params
+        <<: *mysql_params_full
       register: format_info
 
     - name: Assert log format
@@ -109,7 +155,7 @@
 
     - name: Create audit filter
       mysql_audit:
-        <<: *mysql_params
+        <<: *mysql_params_full
         state: present
         filter_name: log_all
         filter_rule:
@@ -126,7 +172,7 @@
 
     - name: Gather info to verify filter
       mysql_audit_info:
-        <<: *mysql_params
+        <<: *mysql_params_full
       register: filter_info
 
     - name: Assert filter exists in info
@@ -140,7 +186,7 @@
 
     - name: Rotate audit log
       mysql_audit:
-        <<: *mysql_params
+        <<: *mysql_params_full
         state: present
         rotate: true
       register: rotate_result
@@ -156,7 +202,7 @@
 
     - name: Uninstall audit plugin (check mode)
       mysql_audit:
-        <<: *mysql_params
+        <<: *mysql_params_full
         state: absent
       check_mode: true
       register: uninstall_check
@@ -168,7 +214,7 @@
 
     - name: Uninstall audit plugin
       mysql_audit:
-        <<: *mysql_params
+        <<: *mysql_params_full
         state: absent
       register: uninstall_result
 
@@ -179,7 +225,7 @@
 
     - name: Uninstall audit plugin again (idempotency)
       mysql_audit:
-        <<: *mysql_params
+        <<: *mysql_params_full
         state: absent
       register: uninstall_idem
 
@@ -190,7 +236,7 @@
 
     - name: Gather info after uninstall
       mysql_audit_info:
-        <<: *mysql_params
+        <<: *mysql_params_full
       register: audit_info_final
 
     - name: Assert plugin is no longer installed

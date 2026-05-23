@@ -99,6 +99,7 @@ from ansible_collections.ansible.mysql.plugins.module_utils.mysql import (
     mysql_driver,
     mysql_driver_fail_msg,
     mysql_common_argument_spec,
+    get_server_implementation,
 )
 from ansible.module_utils.common.text.converters import to_native
 
@@ -215,6 +216,14 @@ def main():
                 msg="unable to find %s. Exception message: %s"
                     % (config_file, to_native(e))
             )
+
+    server_implementation = get_server_implementation(cursor)
+    if server_implementation == "mariadb":
+        module.fail_json(
+            msg="mysql_audit_info does not support MariaDB. "
+                "MariaDB uses a separate audit plugin (server_audit). "
+                "See https://mariadb.com/kb/en/mariadb-audit-plugin/"
+        )
 
     result = {}
 
