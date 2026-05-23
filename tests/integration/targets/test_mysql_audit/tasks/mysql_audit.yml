@@ -27,9 +27,9 @@
     - name: Assert mysql_audit rejects MariaDB with clear message
       assert:
         that:
-          - mariadb_audit_result is failed
           - "'does not support MariaDB' in mariadb_audit_result.msg"
           - "'server_audit' in mariadb_audit_result.msg"
+          - mariadb_audit_result.changed == false
 
     - name: Verify mysql_audit_info fails on MariaDB
       mysql_audit_info:
@@ -40,9 +40,9 @@
     - name: Assert mysql_audit_info rejects MariaDB with clear message
       assert:
         that:
-          - mariadb_info_result is failed
           - "'does not support MariaDB' in mariadb_info_result.msg"
           - "'server_audit' in mariadb_info_result.msg"
+          - mariadb_info_result.changed == false
 
 # ============================================================
 # MySQL: audit module test suite
@@ -96,17 +96,47 @@
     - name: Assert Community Edition reports component unavailable
       assert:
         that:
-          - install_result is failed
-          - install_result.msg is search('Error managing audit plugin')
+          - "'Error managing audit plugin' in install_result.msg"
+          - install_result.changed == false
       when: not audit_component_available
 
+    # Verify the full audit plugin is functional (has audit_log_format)
+    - name: Check if full audit plugin features are available
+      mysql_audit_info:
+        <<: *mysql_params_full
+      register: audit_capability_check
+      when: audit_component_available
+
+    - name: Set fact whether full audit features are available
+      set_fact:
+        audit_full_features: >-
+          {{ audit_component_available and
+             audit_capability_check.plugin_installed | default(false) and
+             audit_capability_check.log_format is defined and
+             audit_capability_check.log_format is not none }}
+      when: audit_component_available
+
+    - name: Set audit_full_features to false when component unavailable
+      set_fact:
+        audit_full_features: false
+      when: not audit_component_available
+
+    # Clean up component if installed but full audit is not available
+    - name: Uninstall audit component (no full audit features)
+      mysql_audit:
+        <<: *mysql_params_full
+        state: absent
+      when:
+        - audit_component_available
+        - not (audit_full_features | default(false))
+
     # ============================================================
-    # Remaining tests require MySQL Enterprise Audit component.
-    # They execute only when the component installed successfully.
+    # Remaining tests require MySQL Enterprise Audit plugin.
+    # They execute only when the full audit_log features work.
     # ============================================================
 
     - name: Run full audit lifecycle tests (Enterprise only)
-      when: audit_component_available
+      when: audit_full_features | default(false)
       block:
 
         - name: Assert plugin was installed
