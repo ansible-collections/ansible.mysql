@@ -1,22 +1,38 @@
 # test code for the mysql_tls module
-
-# This file is part of Ansible
 #
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# Copyright: (c) 2026, Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 # ============================================================
-# Test mysql_tls module
+# MariaDB: verify module fails with a clear error message
+# ============================================================
+
+- vars:
+    mysql_parameters: &mysql_params_mariadb
+      login_user: '{{ mysql_user }}'
+      login_password: '{{ mysql_password }}'
+      login_host: '{{ mysql_host }}'
+      login_port: '{{ mysql_primary_port }}'
+
+  when: db_engine == 'mariadb'
+  block:
+
+    - name: Verify mysql_tls fails on MariaDB
+      mysql_tls:
+        <<: *mysql_params_mariadb
+        state: present
+      register: mariadb_tls_result
+      failed_when: false
+
+    - name: Assert mysql_tls rejects MariaDB with clear message
+      assert:
+        that:
+          - "'does not support MariaDB' in mariadb_tls_result.msg"
+          - "'FLUSH SSL' in mariadb_tls_result.msg"
+          - mariadb_tls_result.changed == false
+
+# ============================================================
+# MySQL: TLS module test suite
 # ============================================================
 
 - vars:
@@ -26,47 +42,130 @@
       login_host: '{{ mysql_host }}'
       login_port: '{{ mysql_primary_port }}'
 
+  when: db_engine == 'mysql'
   block:
 
     # ============================================================
-    # Test: Read current TLS state (no changes, state=present with no params)
+    # Test: no changes when no params specified
     # ============================================================
+
     - name: Get current TLS settings (no changes expected)
       mysql_tls:
         <<: *mysql_params
         state: present
-      register: result
+      register: result_noop
 
     - name: Assert no change when no params specified
       assert:
         that:
-          - result is not changed
+          - result_noop is not changed
 
     # ============================================================
-    # Test: Set require_secure_transport in check_mode
+    # Test: set certificate paths
     # ============================================================
-    - name: Set require_secure_transport in check_mode
+
+    - name: Set server certificate paths
       mysql_tls:
         <<: *mysql_params
-        require_secure_transport: false
+        server_cert: /tmp/test-server-cert.pem
+        server_key: /tmp/test-server-key.pem
+        server_ca: /tmp/test-ca-cert.pem
+      register: result_certs
+
+    - name: Assert certificate paths were set
+      assert:
+        that:
+          - result_certs is changed
+          - result_certs.queries | length >= 3
+
+    - name: Verify ssl_cert via mysql_variables
+      mysql_variables:
+        <<: *mysql_params
+        variable: ssl_cert
+      register: ssl_cert_val
+
+    - name: Assert ssl_cert was set
+      assert:
+        that:
+          - ssl_cert_val.msg == '/tmp/test-server-cert.pem'
+
+    - name: Verify ssl_key via mysql_variables
+      mysql_variables:
+        <<: *mysql_params
+        variable: ssl_key
+      register: ssl_key_val
+
+    - name: Assert ssl_key was set
+      assert:
+        that:
+          - ssl_key_val.msg == '/tmp/test-server-key.pem'
+
+    - name: Verify ssl_ca via mysql_variables
+      mysql_variables:
+        <<: *mysql_params
+        variable: ssl_ca
+      register: ssl_ca_val
+
+    - name: Assert ssl_ca was set
+      assert:
+        that:
+          - ssl_ca_val.msg == '/tmp/test-ca-cert.pem'
+
+    # ============================================================
+    # Test: certificate paths idempotency
+    # ============================================================
+
+    - name: Set same certificate paths again (idempotency)
+      mysql_tls:
+        <<: *mysql_params
+        server_cert: /tmp/test-server-cert.pem
+        server_key: /tmp/test-server-key.pem
+        server_ca: /tmp/test-ca-cert.pem
+      register: result_certs_idem
+
+    - name: Assert no change on idempotent cert run
+      assert:
+        that:
+          - result_certs_idem is not changed
+
+    # ============================================================
+    # Test: check mode for certificate paths
+    # ============================================================
+
+    - name: Set new cert path in check mode
+      mysql_tls:
+        <<: *mysql_params
+        server_cert: /tmp/new-cert.pem
       check_mode: true
       register: result_check
 
-    - name: Verify check_mode returns queries
+    - name: Assert check mode reports changed
       assert:
         that:
-          - result_check is not failed
+          - result_check is changed
+          - result_check.queries | length > 0
+
+    - name: Verify cert not actually changed after check mode
+      mysql_variables:
+        <<: *mysql_params
+        variable: ssl_cert
+      register: ssl_cert_after_check
+
+    - name: Assert original cert still in place
+      assert:
+        that:
+          - ssl_cert_after_check.msg == '/tmp/test-server-cert.pem'
 
     # ============================================================
-    # Test: Set tls_version
+    # Test: set tls_version
     # ============================================================
+
     - name: Set tls_version to TLSv1.2,TLSv1.3
       mysql_tls:
         <<: *mysql_params
         tls_version: 'TLSv1.2,TLSv1.3'
       register: result_tls_ver
 
-    # Verify by reading the variable directly
     - name: Read tls_version variable
       mysql_variables:
         <<: *mysql_params
@@ -79,22 +178,24 @@
           - tls_ver_value.msg == 'TLSv1.2,TLSv1.3'
 
     # ============================================================
-    # Test: Idempotency - set same tls_version again
+    # Test: tls_version idempotency
     # ============================================================
+
     - name: Set tls_version again (idempotency)
       mysql_tls:
         <<: *mysql_params
         tls_version: 'TLSv1.2,TLSv1.3'
-      register: result_idem
+      register: result_tls_idem
 
-    - name: Assert no change on idempotent run
+    - name: Assert no change on idempotent tls_version
       assert:
         that:
-          - result_idem is not changed
+          - result_tls_idem is not changed
 
     # ============================================================
-    # Test: Set require_secure_transport to ON
+    # Test: require_secure_transport
     # ============================================================
+
     - name: Enable require_secure_transport
       mysql_tls:
         <<: *mysql_params
@@ -113,13 +214,19 @@
           - secure_value.msg == 'ON'
 
     # ============================================================
-    # Test: Reset to defaults with state=absent
+    # Test: state=absent resets cert paths and secure_transport
     # ============================================================
+
     - name: Reset TLS to defaults
       mysql_tls:
         <<: *mysql_params
         state: absent
       register: result_absent
+
+    - name: Assert absent caused changes
+      assert:
+        that:
+          - result_absent is changed
 
     - name: Read require_secure_transport after reset
       mysql_variables:
@@ -132,9 +239,32 @@
         that:
           - secure_after_reset.msg == 'OFF'
 
+    - name: Read ssl_cert after reset
+      mysql_variables:
+        <<: *mysql_params
+        variable: ssl_cert
+      register: ssl_cert_after_reset
+
+    - name: Assert ssl_cert is empty after reset
+      assert:
+        that:
+          - ssl_cert_after_reset.msg == ''
+
+    - name: Read tls_version after reset (should be unchanged)
+      mysql_variables:
+        <<: *mysql_params
+        variable: tls_version
+      register: tls_ver_after_reset
+
+    - name: Assert tls_version was NOT reset by state absent
+      assert:
+        that:
+          - tls_ver_after_reset.msg == 'TLSv1.2,TLSv1.3'
+
     # ============================================================
     # Test: state=absent idempotency
     # ============================================================
+
     - name: Reset TLS to defaults again (idempotency)
       mysql_tls:
         <<: *mysql_params
@@ -147,16 +277,38 @@
           - result_absent_idem is not changed
 
     # ============================================================
-    # Test: reload option
+    # Test: reload only triggers when variables changed
     # ============================================================
-    - name: Reload TLS context
+
+    - name: Reload with no variable changes (idempotent)
       mysql_tls:
         <<: *mysql_params
         reload: true
-      register: result_reload
+      register: result_reload_noop
 
-    - name: Assert reload caused a change
+    - name: Assert reload with no changes is not changed
       assert:
         that:
-          - result_reload is changed
-          - "'ALTER INSTANCE RELOAD TLS' in result_reload.queries"
+          - result_reload_noop is not changed
+
+    - name: Set a variable with reload
+      mysql_tls:
+        <<: *mysql_params
+        require_secure_transport: true
+        reload: true
+      register: result_reload_changed
+
+    - name: Assert reload with variable change is changed
+      assert:
+        that:
+          - result_reload_changed is changed
+          - "'ALTER INSTANCE RELOAD TLS' in result_reload_changed.queries"
+
+    # ============================================================
+    # Cleanup: reset secure transport for other tests
+    # ============================================================
+
+    - name: Reset secure transport after reload test
+      mysql_tls:
+        <<: *mysql_params
+        state: absent
