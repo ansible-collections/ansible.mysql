@@ -301,10 +301,10 @@
         that:
           - result_reload_noop is not changed
 
-    - name: Set a safe variable with reload
+    - name: Set tls_version to TLSv1.3 only (triggers reload)
       mysql_tls:
         <<: *mysql_params
-        server_cert: /tmp/reload-test-cert.pem
+        tls_version: 'TLSv1.3'
         reload: true
       register: result_reload_changed
 
@@ -313,12 +313,3 @@
         that:
           - result_reload_changed is changed
           - "'ALTER INSTANCE RELOAD TLS' in result_reload_changed.queries"
-
-    # ============================================================
-    # Cleanup: reset cert paths for other tests
-    # ============================================================
-
-    - name: Reset TLS after reload test
-      mysql_tls:
-        <<: *mysql_params
-        state: absent
