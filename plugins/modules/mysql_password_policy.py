@@ -14,9 +14,11 @@ module: mysql_password_policy
 short_description: Configure MySQL password validation policy
 
 description:
-- Manage the MySQL C(validate_password) component and related global variables.
+- Manage the MySQL C(validate_password) component and related global
+  variables.
 - Install or uninstall the C(validate_password) component (MySQL 8.0+).
-- Configure password complexity requirements, lifetime, and reuse policies.
+- Configure password complexity requirements, lifetime, and reuse
+  policies.
 
 version_added: '5.1.0'
 
@@ -28,54 +30,86 @@ options:
     description:
     - V(present) ensures the C(validate_password) component is installed
       and configured with the specified settings.
-    - V(absent) uninstalls the C(validate_password) component.
+    - V(absent) uninstalls the C(validate_password) component. Any
+      global password parameters provided (O(password_lifetime),
+      O(password_history), O(reuse_interval)) are still applied,
+      allowing a single task to both uninstall the component and
+      reset global policies.
     type: str
     choices: ['present', 'absent']
     default: present
+    version_added: '5.1.0'
   policy:
     description:
     - Password validation policy level.
     - V(LOW) checks length only.
-    - V(MEDIUM) checks length, numeric, mixed case, and special characters.
+    - V(MEDIUM) checks length, numeric, mixed case, and special
+      characters.
     - V(STRONG) checks all of V(MEDIUM) plus dictionary file.
     type: str
     choices: ['LOW', 'MEDIUM', 'STRONG']
+    version_added: '5.1.0'
   length:
     description:
     - Minimum number of characters in a password.
     type: int
+    version_added: '5.1.0'
   mixed_case_count:
     description:
     - Minimum number of uppercase and lowercase characters required.
     type: int
+    version_added: '5.1.0'
   number_count:
     description:
     - Minimum number of numeric characters required.
     type: int
+    version_added: '5.1.0'
   special_char_count:
     description:
     - Minimum number of special (non-alphanumeric) characters required.
     type: int
+    version_added: '5.1.0'
   check_user_name:
     description:
     - Whether passwords are checked against the user name.
     - When V(true), passwords that match the user name are rejected.
     type: bool
+    version_added: '5.1.0'
   password_lifetime:
     description:
     - Default password expiration lifetime in days.
     - V(0) disables automatic password expiration.
+    - This is a global MySQL variable and is processed even when
+      O(state=absent).
     type: int
+    version_added: '5.1.0'
   password_history:
     description:
     - Number of previous passwords that cannot be reused.
     - V(0) disables password history checks.
+    - This is a global MySQL variable and is processed even when
+      O(state=absent).
     type: int
+    version_added: '5.1.0'
   reuse_interval:
     description:
     - Number of days before a password can be reused.
     - V(0) disables reuse interval checks.
+    - This is a global MySQL variable and is processed even when
+      O(state=absent).
     type: int
+    version_added: '5.1.0'
+  mode:
+    description:
+    - How variables are set.
+    - C(global) uses C(SET GLOBAL) which does not survive a MySQL
+      restart unless also configured in C(my.cnf).
+    - C(persist) uses C(SET PERSIST) which writes to
+      C(mysqld-auto.cnf) and survives restarts.
+    type: str
+    choices: ['global', 'persist']
+    default: global
+    version_added: '5.1.0'
 
 attributes:
   check_mode:
@@ -91,11 +125,12 @@ seealso:
   link: https://dev.mysql.com/doc/refman/8.0/en/validate-password.html
 
 notes:
-   - Requires MySQL 8.0 or later.
+   - Requires MySQL 8.0 or later. MariaDB is not supported.
    - The C(validate_password) component must be available on the server.
-   - In MySQL 5.7, the validate_password plugin uses underscores in variable
-     names (e.g., C(validate_password_policy)) rather than dots. This module
-     targets MySQL 8.0+ component syntax with dot notation.
+   - When O(mode=global), settings do not survive a MySQL restart
+     unless also set in C(my.cnf). Use O(mode=persist) or the
+     M(ansible.mysql.mysql_variables) module with C(mode=persist)
+     for persistent configuration.
 
 extends_documentation_fragment:
 - ansible.mysql.mysql
@@ -119,16 +154,20 @@ EXAMPLES = r'''
     reuse_interval: 365
     login_unix_socket: /run/mysqld/mysqld.sock
 
-- name: Uninstall validate_password component
+- name: Uninstall component and reset global policies in one task
   ansible.mysql.mysql_password_policy:
     state: absent
+    password_lifetime: 0
+    password_history: 0
+    reuse_interval: 0
     login_unix_socket: /run/mysqld/mysqld.sock
 
-- name: Enforce STRONG policy with username check
+- name: Enforce STRONG policy with username check (persistent)
   ansible.mysql.mysql_password_policy:
     policy: STRONG
     length: 16
     check_user_name: true
+    mode: persist
     login_unix_socket: /run/mysqld/mysqld.sock
 '''
 
@@ -145,18 +184,23 @@ import os
 import warnings
 
 from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.ansible.mysql.plugins.module_utils.database import mysql_quote_identifier
+from ansible_collections.ansible.mysql.plugins.module_utils.database import (
+    mysql_quote_identifier,
+)
 from ansible_collections.ansible.mysql.plugins.module_utils.mysql import (
     mysql_connect,
     mysql_driver,
     mysql_driver_fail_msg,
     mysql_common_argument_spec,
+    get_server_implementation,
+    get_server_version,
+)
+from ansible_collections.ansible.mysql.plugins.module_utils._version import (
+    LooseVersion,
 )
 from ansible.module_utils.common.text.converters import to_native
 
 
-# Mapping of module parameters to MySQL global variable names
-# validate_password.* variables only exist when the component is installed
 VALIDATE_PASSWORD_PARAMS = {
     'policy': 'validate_password.policy',
     'length': 'validate_password.length',
@@ -166,14 +210,12 @@ VALIDATE_PASSWORD_PARAMS = {
     'check_user_name': 'validate_password.check_user_name',
 }
 
-# Global password policy variables (exist regardless of component)
 GLOBAL_PASSWORD_PARAMS = {
     'password_lifetime': 'default_password_lifetime',
     'password_history': 'password_history',
     'reuse_interval': 'password_reuse_interval',
 }
 
-# Policy name to numeric value mapping for comparison
 POLICY_MAP = {
     'LOW': '0',
     'MEDIUM': '1',
@@ -187,33 +229,30 @@ POLICY_MAP = {
 def is_component_installed(cursor):
     """Check if validate_password component is installed."""
     try:
-        cursor.execute("SHOW VARIABLES LIKE 'validate_password.policy'")
+        cursor.execute(
+            "SHOW VARIABLES LIKE 'validate_password.policy'")
         return cursor.fetchone() is not None
     except Exception:
         return False
 
 
-def get_current_variables(cursor, var_pattern):
-    """Retrieve current variable values matching a LIKE pattern."""
-    result = {}
-    cursor.execute("SHOW VARIABLES LIKE %s", (var_pattern,))
-    for row in cursor.fetchall():
-        result[row[0]] = row[1]
-    return result
-
-
 def get_variable(cursor, var_name):
     """Get a single variable value."""
-    cursor.execute("SHOW VARIABLES WHERE Variable_name = %s", (var_name,))
+    cursor.execute(
+        "SHOW VARIABLES WHERE Variable_name = %s", (var_name,))
     row = cursor.fetchone()
     if row:
         return row[1]
     return None
 
 
-def set_global_variable(cursor, var_name, value):
-    """Set a global variable and return the query string."""
-    query = "SET GLOBAL %s = " % mysql_quote_identifier(var_name, 'vars')
+def set_variable(cursor, var_name, value, mode='global'):
+    """Set a global or persistent variable and return the query."""
+    if mode == 'persist':
+        prefix = "SET PERSIST"
+    else:
+        prefix = "SET GLOBAL"
+    query = "%s %s = " % (prefix, mysql_quote_identifier(var_name, 'vars'))
     cursor.execute(query + "%s", (value,))
     return query + "'%s'" % value
 
@@ -237,13 +276,13 @@ def values_match(var_name, current_val, desired_val):
     if current_val is None:
         return False
 
-    # Policy can be reported as name or number
     if var_name == 'validate_password.policy':
-        current_norm = POLICY_MAP.get(str(current_val).upper(), str(current_val))
-        desired_norm = POLICY_MAP.get(str(desired_val).upper(), str(desired_val))
+        current_norm = POLICY_MAP.get(
+            str(current_val).upper(), str(current_val))
+        desired_norm = POLICY_MAP.get(
+            str(desired_val).upper(), str(desired_val))
         return current_norm == desired_norm
 
-    # Boolean ON/OFF comparison
     if var_name == 'validate_password.check_user_name':
         current_norm = str(current_val).upper()
         if isinstance(desired_val, bool):
@@ -258,7 +297,8 @@ def values_match(var_name, current_val, desired_val):
 def main():
     argument_spec = mysql_common_argument_spec()
     argument_spec.update(
-        state=dict(type='str', choices=['present', 'absent'], default='present'),
+        state=dict(type='str', choices=['present', 'absent'],
+                   default='present'),
         policy=dict(type='str', choices=['LOW', 'MEDIUM', 'STRONG']),
         length=dict(type='int'),
         mixed_case_count=dict(type='int'),
@@ -268,6 +308,8 @@ def main():
         password_lifetime=dict(type='int', no_log=False),
         password_history=dict(type='int', no_log=False),
         reuse_interval=dict(type='int'),
+        mode=dict(type='str', choices=['global', 'persist'],
+                  default='global'),
     )
 
     module = AnsibleModule(
@@ -275,8 +317,8 @@ def main():
         supports_check_mode=True,
     )
 
-    user = module.params["login_user"]
-    password = module.params["login_password"]
+    login_user = module.params["login_user"]
+    login_password = module.params["login_password"]
     connect_timeout = module.params['connect_timeout']
     ssl_cert = module.params["client_cert"]
     ssl_key = module.params["client_key"]
@@ -286,6 +328,7 @@ def main():
     db = 'mysql'
 
     state = module.params['state']
+    mode = module.params['mode']
 
     if mysql_driver is None:
         module.fail_json(msg=mysql_driver_fail_msg)
@@ -294,7 +337,7 @@ def main():
 
     try:
         cursor, db_conn = mysql_connect(
-            module, user, password, config_file,
+            module, login_user, login_password, config_file,
             ssl_cert, ssl_key, ssl_ca, db,
             connect_timeout=connect_timeout,
             check_hostname=check_hostname,
@@ -308,77 +351,105 @@ def main():
             )
         else:
             module.fail_json(
-                msg="unable to find %s. Exception message: %s" % (config_file, to_native(e))
+                msg="unable to find %s. Exception message: %s"
+                    % (config_file, to_native(e))
             )
+
+    # Engine and version guardrails
+    server_impl = get_server_implementation(cursor)
+    if server_impl == "mariadb":
+        module.fail_json(
+            msg="mysql_password_policy does not support MariaDB. "
+                "MariaDB password validation uses the "
+                "simple_password_check or cracklib_password_check "
+                "plugins. See https://mariadb.com/kb/en/"
+                "password-validation-plugin-api/"
+        )
+
+    server_version = get_server_version(cursor)
+    version_clean = server_version.split('-')[0]
+    if LooseVersion(version_clean) < LooseVersion("8.0"):
+        module.fail_json(
+            msg="mysql_password_policy requires MySQL 8.0 or later. "
+                "Detected version: %s" % server_version
+        )
 
     installed = is_component_installed(cursor)
     changed = False
     executed_queries = []
 
+    # ---- Component install/uninstall ----
     if state == 'absent':
-        if not installed:
-            module.exit_json(changed=False, msg="validate_password component is not installed.")
-
-        if module.check_mode:
-            module.exit_json(
-                changed=True,
-                queries=["UNINSTALL COMPONENT 'file://component_validate_password'"],
-            )
-
-        try:
-            query = uninstall_component(cursor)
-            executed_queries.append(query)
-            changed = True
-        except Exception as e:
-            module.fail_json(msg="Failed to uninstall validate_password component: %s" % to_native(e))
-
-        module.exit_json(changed=changed, queries=executed_queries)
-
-    # state == 'present'
-    # Install component if not present
-    if not installed:
-        if module.check_mode:
-            executed_queries.append("INSTALL COMPONENT 'file://component_validate_password'")
-            changed = True
-        else:
-            try:
-                query = install_component(cursor)
-                executed_queries.append(query)
-                changed = True
-            except Exception as e:
-                module.fail_json(
-                    msg="Failed to install validate_password component: %s" % to_native(e)
-                )
-
-    # Configure validate_password.* variables
-    for param, var_name in VALIDATE_PASSWORD_PARAMS.items():
-        desired_val = module.params[param]
-        if desired_val is None:
-            continue
-
-        if not module.check_mode:
-            current_val = get_variable(cursor, var_name)
-        else:
-            # In check mode after install, we cannot read vars that don't exist yet
-            current_val = None if not installed and changed else get_variable(cursor, var_name)
-
-        if param == 'check_user_name':
-            set_val = 'ON' if desired_val else 'OFF'
-        else:
-            set_val = desired_val
-
-        if not values_match(var_name, current_val, desired_val):
+        if installed:
             if module.check_mode:
-                executed_queries.append("SET GLOBAL `%s` = '%s'" % (var_name, set_val))
+                executed_queries.append(
+                    "UNINSTALL COMPONENT "
+                    "'file://component_validate_password'")
+                changed = True
             else:
                 try:
-                    query = set_global_variable(cursor, var_name, set_val)
+                    query = uninstall_component(cursor)
                     executed_queries.append(query)
+                    changed = True
                 except Exception as e:
-                    module.fail_json(msg="Failed to set %s: %s" % (var_name, to_native(e)))
-            changed = True
+                    module.fail_json(
+                        msg="Failed to uninstall validate_password "
+                            "component: %s" % to_native(e))
+        # Do NOT exit here — fall through to process global params
 
-    # Configure global password policy variables
+    elif state == 'present':
+        if not installed:
+            if module.check_mode:
+                executed_queries.append(
+                    "INSTALL COMPONENT "
+                    "'file://component_validate_password'")
+                changed = True
+            else:
+                try:
+                    query = install_component(cursor)
+                    executed_queries.append(query)
+                    changed = True
+                except Exception as e:
+                    module.fail_json(
+                        msg="Failed to install validate_password "
+                            "component: %s" % to_native(e))
+
+        # Configure validate_password.* variables (only when present)
+        for param, var_name in VALIDATE_PASSWORD_PARAMS.items():
+            desired_val = module.params[param]
+            if desired_val is None:
+                continue
+
+            if not module.check_mode:
+                current_val = get_variable(cursor, var_name)
+            else:
+                current_val = (
+                    None if not installed and changed
+                    else get_variable(cursor, var_name))
+
+            if param == 'check_user_name':
+                set_val = 'ON' if desired_val else 'OFF'
+            else:
+                set_val = desired_val
+
+            if not values_match(var_name, current_val, desired_val):
+                if module.check_mode:
+                    executed_queries.append(
+                        "SET %s `%s` = '%s'"
+                        % ('PERSIST' if mode == 'persist' else 'GLOBAL',
+                           var_name, set_val))
+                else:
+                    try:
+                        query = set_variable(
+                            cursor, var_name, set_val, mode)
+                        executed_queries.append(query)
+                    except Exception as e:
+                        module.fail_json(
+                            msg="Failed to set %s: %s"
+                                % (var_name, to_native(e)))
+                changed = True
+
+    # ---- Global password params (always processed) ----
     for param, var_name in GLOBAL_PASSWORD_PARAMS.items():
         desired_val = module.params[param]
         if desired_val is None:
@@ -388,13 +459,19 @@ def main():
 
         if not values_match(var_name, current_val, desired_val):
             if module.check_mode:
-                executed_queries.append("SET GLOBAL `%s` = '%s'" % (var_name, desired_val))
+                executed_queries.append(
+                    "SET %s `%s` = '%s'"
+                    % ('PERSIST' if mode == 'persist' else 'GLOBAL',
+                       var_name, desired_val))
             else:
                 try:
-                    query = set_global_variable(cursor, var_name, desired_val)
+                    query = set_variable(
+                        cursor, var_name, desired_val, mode)
                     executed_queries.append(query)
                 except Exception as e:
-                    module.fail_json(msg="Failed to set %s: %s" % (var_name, to_native(e)))
+                    module.fail_json(
+                        msg="Failed to set %s: %s"
+                            % (var_name, to_native(e)))
             changed = True
 
     module.exit_json(changed=changed, queries=executed_queries)
