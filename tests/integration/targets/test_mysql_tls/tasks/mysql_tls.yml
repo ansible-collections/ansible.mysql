@@ -61,7 +61,119 @@
           - result_noop is not changed
 
     # ============================================================
+    # Test: reload (run FIRST while SSL context is clean)
+    # ALTER INSTANCE RELOAD TLS validates the entire SSL context.
+    # If cert paths were previously set to dummy values or emptied,
+    # the reload fails. Test reload before touching any cert paths.
+    # ============================================================
+
+    - name: Reload with no variable changes (idempotent)
+      mysql_tls:
+        <<: *mysql_params
+        reload: true
+      register: result_reload_noop
+
+    - name: Assert reload with no changes is not changed
+      assert:
+        that:
+          - result_reload_noop is not changed
+
+    - name: Set tls_version to TLSv1.3 only with reload
+      mysql_tls:
+        <<: *mysql_params
+        tls_version: 'TLSv1.3'
+        reload: true
+      register: result_reload_changed
+
+    - name: Assert reload with variable change is changed
+      assert:
+        that:
+          - result_reload_changed is changed
+          - "'ALTER INSTANCE RELOAD TLS' in result_reload_changed.queries"
+
+    # ============================================================
+    # Test: set tls_version (restore to TLSv1.2,TLSv1.3)
+    # ============================================================
+
+    - name: Set tls_version to TLSv1.2,TLSv1.3
+      mysql_tls:
+        <<: *mysql_params
+        tls_version: 'TLSv1.2,TLSv1.3'
+      register: result_tls_ver
+
+    - name: Read tls_version variable
+      mysql_variables:
+        <<: *mysql_params
+        variable: tls_version
+      register: tls_ver_value
+
+    - name: Assert tls_version was set
+      assert:
+        that:
+          - tls_ver_value.msg == 'TLSv1.2,TLSv1.3'
+
+    # ============================================================
+    # Test: tls_version idempotency
+    # ============================================================
+
+    - name: Set tls_version again (idempotency)
+      mysql_tls:
+        <<: *mysql_params
+        tls_version: 'TLSv1.2,TLSv1.3'
+      register: result_tls_idem
+
+    - name: Assert no change on idempotent tls_version
+      assert:
+        that:
+          - result_tls_idem is not changed
+
+    # ============================================================
+    # Test: require_secure_transport (check_mode only)
+    # Setting require_secure_transport=ON blocks unencrypted CI
+    # connections, so verify query generation in check_mode only.
+    # ============================================================
+
+    - name: Enable require_secure_transport (check_mode)
+      mysql_tls:
+        <<: *mysql_params
+        require_secure_transport: true
+      check_mode: true
+      register: result_secure_check
+
+    - name: Assert check_mode generates correct query
+      assert:
+        that:
+          - result_secure_check is changed
+          - result_secure_check.queries | length > 0
+
+    - name: Verify require_secure_transport unchanged after check_mode
+      mysql_variables:
+        <<: *mysql_params
+        variable: require_secure_transport
+      register: secure_still_off
+
+    - name: Assert require_secure_transport is still OFF
+      assert:
+        that:
+          - secure_still_off.msg == 'OFF'
+
+    - name: Set require_secure_transport to false (explicit OFF)
+      mysql_tls:
+        <<: *mysql_params
+        require_secure_transport: false
+      register: result_secure_off
+
+    - name: Assert no change (already OFF)
+      assert:
+        that:
+          - result_secure_off is not changed
+
+    # ============================================================
     # Test: set certificate paths
+    # These are dummy paths that don't exist on the MySQL server.
+    # SET GLOBAL ssl_cert accepts any path string — validation only
+    # happens on ALTER INSTANCE RELOAD TLS. So we test setting and
+    # reading paths, but never reload after setting dummy certs.
     # ============================================================
 
     - name: Set server certificate paths
@@ -157,84 +269,6 @@
           - ssl_cert_after_check.msg == '/tmp/test-server-cert.pem'
 
     # ============================================================
-    # Test: set tls_version
-    # ============================================================
-
-    - name: Set tls_version to TLSv1.2,TLSv1.3
-      mysql_tls:
-        <<: *mysql_params
-        tls_version: 'TLSv1.2,TLSv1.3'
-      register: result_tls_ver
-
-    - name: Read tls_version variable
-      mysql_variables:
-        <<: *mysql_params
-        variable: tls_version
-      register: tls_ver_value
-
-    - name: Assert tls_version was set
-      assert:
-        that:
-          - tls_ver_value.msg == 'TLSv1.2,TLSv1.3'
-
-    # ============================================================
-    # Test: tls_version idempotency
-    # ============================================================
-
-    - name: Set tls_version again (idempotency)
-      mysql_tls:
-        <<: *mysql_params
-        tls_version: 'TLSv1.2,TLSv1.3'
-      register: result_tls_idem
-
-    - name: Assert no change on idempotent tls_version
-      assert:
-        that:
-          - result_tls_idem is not changed
-
-    # ============================================================
-    # Test: require_secure_transport (check_mode only)
-    # Setting require_secure_transport=ON blocks unencrypted CI
-    # connections, so we verify the query generation in check_mode
-    # and test the OFF → OFF idempotency path directly.
-    # ============================================================
-
-    - name: Enable require_secure_transport (check_mode)
-      mysql_tls:
-        <<: *mysql_params
-        require_secure_transport: true
-      check_mode: true
-      register: result_secure_check
-
-    - name: Assert check_mode generates correct query
-      assert:
-        that:
-          - result_secure_check is changed
-          - result_secure_check.queries | length > 0
-
-    - name: Verify require_secure_transport unchanged after check_mode
-      mysql_variables:
-        <<: *mysql_params
-        variable: require_secure_transport
-      register: secure_still_off
-
-    - name: Assert require_secure_transport is still OFF
-      assert:
-        that:
-          - secure_still_off.msg == 'OFF'
-
-    - name: Set require_secure_transport to false (explicit OFF)
-      mysql_tls:
-        <<: *mysql_params
-        require_secure_transport: false
-      register: result_secure_off
-
-    - name: Assert no change (already OFF)
-      assert:
-        that:
-          - result_secure_off is not changed
-
-    # ============================================================
     # Test: state=absent resets cert paths
     # ============================================================
 
@@ -285,31 +319,3 @@
       assert:
         that:
           - result_absent_idem is not changed
-
-    # ============================================================
-    # Test: reload only triggers when variables changed
-    # ============================================================
-
-    - name: Reload with no variable changes (idempotent)
-      mysql_tls:
-        <<: *mysql_params
-        reload: true
-      register: result_reload_noop
-
-    - name: Assert reload with no changes is not changed
-      assert:
-        that:
-          - result_reload_noop is not changed
-
-    - name: Set tls_version to TLSv1.3 only (triggers reload)
-      mysql_tls:
-        <<: *mysql_params
-        tls_version: 'TLSv1.3'
-        reload: true
-      register: result_reload_changed
-
-    - name: Assert reload with variable change is changed
-      assert:
-        that:
-          - result_reload_changed is changed
-          - "'ALTER INSTANCE RELOAD TLS' in result_reload_changed.queries"
