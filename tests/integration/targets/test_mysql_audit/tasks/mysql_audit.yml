@@ -253,7 +253,7 @@
         # ============================================================
 
         - name: Create test user for assignment
-          community.mysql.mysql_user:
+          mysql_user:
             <<: *mysql_params_full
             name: audit_test_user
             host: '%'
@@ -290,7 +290,7 @@
         # ============================================================
 
         - name: Create second test user
-          community.mysql.mysql_user:
+          mysql_user:
             <<: *mysql_params_full
             name: audit_test_user2
             host: '%'
@@ -615,7 +615,7 @@
       # Clean up test users
       always:
         - name: Remove test users
-          community.mysql.mysql_user:
+          mysql_user:
             <<: *mysql_params_full
             name: '{{ item }}'
             host: '%'
