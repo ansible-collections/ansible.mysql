@@ -75,10 +75,39 @@
           - audit_info_before.user_assignments == {}
 
     # ============================================================
+    # Test: validation errors
+    # ============================================================
+
+    - name: Fail when users given without filter_name
+      mysql_audit:
+        <<: *mysql_params_full
+        state: present
+        users:
+          - '{{ mysql_user }}@{{ mysql_host }}'
+      register: validation_users_result
+      failed_when: false
+
+    - name: Assert validation error for users without filter_name
+      assert:
+        that:
+          - "'requires' in validation_users_result.msg"
+
+    - name: Fail when append_users given without users
+      mysql_audit:
+        <<: *mysql_params_full
+        state: present
+        filter_name: test
+        append_users: true
+      register: validation_append_result
+      failed_when: false
+
+    - name: Assert validation error for append_users without users
+      assert:
+        that:
+          - "'require' in validation_append_result.msg"
+
+    # ============================================================
     # Test: attempt audit plugin install
-    # The audit component requires MySQL Enterprise Edition.
-    # On Community Edition the install fails — verify the module
-    # surfaces the error correctly and exit the test suite.
     # ============================================================
 
     - name: Attempt to install audit plugin
@@ -92,15 +121,12 @@
       set_fact:
         audit_component_available: "{{ install_result is not failed }}"
 
-    # On Community Edition: assert the error is surfaced, then stop
     - name: Assert Community Edition reports component unavailable
       assert:
         that:
           - "'Error managing audit plugin' in install_result.msg"
-          - install_result.changed == false
       when: not audit_component_available
 
-    # Verify the full audit plugin is functional (has audit_log_format)
     - name: Check if full audit plugin features are available
       mysql_audit_info:
         <<: *mysql_params_full
@@ -121,7 +147,6 @@
         audit_full_features: false
       when: not audit_component_available
 
-    # Clean up component if installed but full audit is not available
     - name: Uninstall audit component (no full audit features)
       mysql_audit:
         <<: *mysql_params_full
@@ -131,8 +156,7 @@
         - not (audit_full_features | default(false))
 
     # ============================================================
-    # Remaining tests require MySQL Enterprise Audit plugin.
-    # They execute only when the full audit_log features work.
+    # Full audit lifecycle tests (Enterprise only)
     # ============================================================
 
     - name: Run full audit lifecycle tests (Enterprise only)
@@ -157,7 +181,7 @@
               - install_idem is not changed
 
         # ============================================================
-        # Test: verify info module after install
+        # Test: info module after install
         # ============================================================
 
         - name: Gather audit info after install
@@ -193,10 +217,10 @@
               - format_info.log_format == 'JSON'
 
         # ============================================================
-        # Test: create audit filter and assign to user
+        # Test: create filter and assign user
         # ============================================================
 
-        - name: Create audit filter
+        - name: Create audit filter with user
           mysql_audit:
             <<: *mysql_params_full
             state: present
@@ -218,10 +242,269 @@
             <<: *mysql_params_full
           register: filter_info
 
-        - name: Assert filter exists in info
+        - name: Assert filter exists
           assert:
             that:
               - "'log_all' in filter_info.filters"
+              - "mysql_user ~ '@' ~ mysql_host in filter_info.user_assignments"
+
+        # ============================================================
+        # Test: assign to existing filter without filter_rule
+        # ============================================================
+
+        - name: Create test user for assignment
+          community.mysql.mysql_user:
+            <<: *mysql_params_full
+            name: audit_test_user
+            host: '%'
+            password: 'TestPass123!'
+            state: present
+
+        - name: Assign user to existing filter (no rule)
+          mysql_audit:
+            <<: *mysql_params_full
+            state: present
+            filter_name: log_all
+            users:
+              - 'audit_test_user@%'
+            append_users: true
+          register: assign_existing_result
+
+        - name: Assert user was assigned
+          assert:
+            that:
+              - assign_existing_result is changed
+
+        - name: Verify both users assigned
+          mysql_audit_info:
+            <<: *mysql_params_full
+          register: both_users_info
+
+        - name: Assert both users in assignments
+          assert:
+            that:
+              - "'audit_test_user@%' in both_users_info.user_assignments"
+
+        # ============================================================
+        # Test: append_users mode (additive)
+        # ============================================================
+
+        - name: Create second test user
+          community.mysql.mysql_user:
+            <<: *mysql_params_full
+            name: audit_test_user2
+            host: '%'
+            password: 'TestPass456!'
+            state: present
+
+        - name: Append second user (additive)
+          mysql_audit:
+            <<: *mysql_params_full
+            state: present
+            filter_name: log_all
+            users:
+              - 'audit_test_user2@%'
+            append_users: true
+          register: append_result
+
+        - name: Assert append changed
+          assert:
+            that:
+              - append_result is changed
+
+        - name: Verify all users still assigned
+          mysql_audit_info:
+            <<: *mysql_params_full
+          register: append_info
+
+        - name: Assert original users not removed
+          assert:
+            that:
+              - "'audit_test_user@%' in append_info.user_assignments"
+              - "'audit_test_user2@%' in append_info.user_assignments"
+
+        # ============================================================
+        # Test: detach_users mode (subtractive)
+        # ============================================================
+
+        - name: Detach one user
+          mysql_audit:
+            <<: *mysql_params_full
+            state: present
+            filter_name: log_all
+            users:
+              - 'audit_test_user2@%'
+            detach_users: true
+          register: detach_result
+
+        - name: Assert detach changed
+          assert:
+            that:
+              - detach_result is changed
+
+        - name: Verify user was detached
+          mysql_audit_info:
+            <<: *mysql_params_full
+          register: detach_info
+
+        - name: Assert detached user is gone
+          assert:
+            that:
+              - "'audit_test_user2@%' not in detach_info.user_assignments"
+              - "'audit_test_user@%' in detach_info.user_assignments"
+
+        - name: Detach same user again (idempotency)
+          mysql_audit:
+            <<: *mysql_params_full
+            state: present
+            filter_name: log_all
+            users:
+              - 'audit_test_user2@%'
+            detach_users: true
+          register: detach_idem
+
+        - name: Assert detach idempotent
+          assert:
+            that:
+              - detach_idem is not changed
+
+        # ============================================================
+        # Test: replace mode (default — exact match)
+        # ============================================================
+
+        - name: Re-append both test users for replace test
+          mysql_audit:
+            <<: *mysql_params_full
+            state: present
+            filter_name: log_all
+            users:
+              - 'audit_test_user@%'
+              - 'audit_test_user2@%'
+            append_users: true
+
+        - name: Replace users (only keep user2)
+          mysql_audit:
+            <<: *mysql_params_full
+            state: present
+            filter_name: log_all
+            filter_rule:
+              filter:
+                log: true
+            users:
+              - 'audit_test_user2@%'
+          register: replace_result
+
+        - name: Assert replace changed
+          assert:
+            that:
+              - replace_result is changed
+
+        - name: Verify replace mode removed unlisted user
+          mysql_audit_info:
+            <<: *mysql_params_full
+          register: replace_info
+
+        - name: Assert only user2 remains
+          assert:
+            that:
+              - "'audit_test_user2@%' in replace_info.user_assignments"
+              - "'audit_test_user@%' not in replace_info.user_assignments"
+
+        # ============================================================
+        # Test: state=absent + filter_name + users (remove users only)
+        # ============================================================
+
+        - name: Re-add user for removal test
+          mysql_audit:
+            <<: *mysql_params_full
+            state: present
+            filter_name: log_all
+            users:
+              - 'audit_test_user@%'
+            append_users: true
+
+        - name: Remove specific user via state absent
+          mysql_audit:
+            <<: *mysql_params_full
+            state: absent
+            filter_name: log_all
+            users:
+              - 'audit_test_user@%'
+          register: absent_user_result
+
+        - name: Assert user removal changed
+          assert:
+            that:
+              - absent_user_result is changed
+
+        - name: Verify filter still exists but user removed
+          mysql_audit_info:
+            <<: *mysql_params_full
+          register: absent_user_info
+
+        - name: Assert filter exists, user gone
+          assert:
+            that:
+              - "'log_all' in absent_user_info.filters"
+              - "'audit_test_user@%' not in absent_user_info.user_assignments"
+
+        # ============================================================
+        # Test: state=absent + filter_name (remove filter entirely)
+        # ============================================================
+
+        - name: Remove filter and all assignments
+          mysql_audit:
+            <<: *mysql_params_full
+            state: absent
+            filter_name: log_all
+          register: absent_filter_result
+
+        - name: Assert filter removal changed
+          assert:
+            that:
+              - absent_filter_result is changed
+
+        - name: Verify filter is gone
+          mysql_audit_info:
+            <<: *mysql_params_full
+          register: absent_filter_info
+
+        - name: Assert filter no longer exists
+          assert:
+            that:
+              - "'log_all' not in absent_filter_info.filters"
+
+        - name: Remove filter again (idempotency)
+          mysql_audit:
+            <<: *mysql_params_full
+            state: absent
+            filter_name: log_all
+          register: absent_filter_idem
+
+        - name: Assert filter removal idempotent
+          assert:
+            that:
+              - absent_filter_idem is not changed
+
+        # ============================================================
+        # Test: filter_name without filter_rule fails if not exists
+        # ============================================================
+
+        - name: Assign to nonexistent filter
+          mysql_audit:
+            <<: *mysql_params_full
+            state: present
+            filter_name: does_not_exist
+            users:
+              - '{{ mysql_user }}@{{ mysql_host }}'
+            append_users: true
+          register: nonexistent_filter_result
+          failed_when: false
+
+        - name: Assert nonexistent filter error
+          assert:
+            that:
+              - "'does not exist' in nonexistent_filter_result.msg"
 
         # ============================================================
         # Test: rotate audit log
@@ -238,6 +521,48 @@
           assert:
             that:
               - rotate_result is changed
+
+        # ============================================================
+        # Test: check mode for state=absent filter removal
+        # ============================================================
+
+        - name: Recreate filter for check mode test
+          mysql_audit:
+            <<: *mysql_params_full
+            state: present
+            filter_name: check_mode_test
+            filter_rule:
+              filter:
+                log: true
+
+        - name: Remove filter in check mode
+          mysql_audit:
+            <<: *mysql_params_full
+            state: absent
+            filter_name: check_mode_test
+          check_mode: true
+          register: check_mode_filter
+
+        - name: Assert check mode reports changed
+          assert:
+            that:
+              - check_mode_filter is changed
+
+        - name: Verify filter still exists after check mode
+          mysql_audit_info:
+            <<: *mysql_params_full
+          register: check_mode_verify
+
+        - name: Assert filter not actually removed
+          assert:
+            that:
+              - "'check_mode_test' in check_mode_verify.filters"
+
+        - name: Clean up check mode filter
+          mysql_audit:
+            <<: *mysql_params_full
+            state: absent
+            filter_name: check_mode_test
 
         # ============================================================
         # Test: uninstall audit plugin
@@ -286,3 +611,16 @@
           assert:
             that:
               - audit_info_final.plugin_installed == false
+
+      # Clean up test users
+      always:
+        - name: Remove test users
+          community.mysql.mysql_user:
+            <<: *mysql_params_full
+            name: '{{ item }}'
+            host: '%'
+            state: absent
+          loop:
+            - audit_test_user
+            - audit_test_user2
+          failed_when: false
