@@ -50,9 +50,9 @@ options:
   mode:
     description:
     - How the log format variable is set.
-    - C(global) uses C(SET GLOBAL) which does not survive a MySQL restart
+    - V(global) uses C(SET GLOBAL) which does not survive a MySQL restart
       unless also configured in C(my.cnf).
-    - C(persist) uses C(SET PERSIST) (MySQL 8.0+ only) which writes the
+    - V(persist) uses C(SET PERSIST) (MySQL 8.0+ only) which writes the
       value to C(mysqld-auto.cnf) and survives restarts.
     type: str
     choices: ['global', 'persist']
