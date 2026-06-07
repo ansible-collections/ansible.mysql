@@ -72,7 +72,6 @@ log_file:
   returned: when plugin is installed
   type: str
   sample: "/var/lib/mysql/audit.log"
-  version_added: '5.1.0'
 filters:
   description: Dictionary of defined audit filters and their rules.
   returned: when plugin is installed
