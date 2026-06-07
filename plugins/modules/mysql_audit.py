@@ -19,8 +19,6 @@ description:
 - Set the audit log format and trigger log rotation.
 - On MySQL 8.0+ the module uses C(INSTALL COMPONENT) for the
   C(component_audit_api_message_emit) component.
-- On MySQL 5.7 the module uses C(INSTALL PLUGIN) for the legacy
-  C(audit_log) plugin.
 
 version_added: '5.1.0'
 
