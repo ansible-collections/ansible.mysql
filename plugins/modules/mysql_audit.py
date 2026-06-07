@@ -46,7 +46,6 @@ options:
     type: str
     choices: ['JSON', 'XML', 'CSV']
     default: JSON
-    version_added: '5.1.0'
   mode:
     description:
     - How the log format variable is set.
