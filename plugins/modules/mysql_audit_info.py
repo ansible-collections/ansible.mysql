@@ -84,7 +84,6 @@ user_assignments:
   returned: when plugin is installed
   type: dict
   sample: {"root@localhost": "log_all"}
-  version_added: '5.1.0'
 '''
 
 import json
