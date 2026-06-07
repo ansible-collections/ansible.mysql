@@ -78,7 +78,6 @@ filters:
   returned: when plugin is installed
   type: dict
   sample: {"log_all": {"filter": {"log": true}}}
-  version_added: '5.1.0'
 user_assignments:
   description: Dictionary mapping users to their assigned filter names.
   returned: when plugin is installed
