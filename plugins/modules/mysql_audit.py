@@ -39,7 +39,6 @@ options:
     type: str
     choices: ['present', 'absent']
     default: present
-    version_added: '5.1.0'
   log_format:
     description:
     - The audit log output format.
