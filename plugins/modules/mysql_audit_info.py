@@ -67,7 +67,6 @@ log_format:
   returned: when plugin is installed
   type: str
   sample: "JSON"
-  version_added: '5.1.0'
 log_file:
   description: Path to the audit log file.
   returned: when plugin is installed
