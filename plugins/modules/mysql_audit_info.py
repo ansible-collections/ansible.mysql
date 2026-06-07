@@ -62,7 +62,6 @@ plugin_installed:
   returned: always
   type: bool
   sample: true
-  version_added: '5.1.0'
 log_format:
   description: Current audit log format setting.
   returned: when plugin is installed
