@@ -29,12 +29,12 @@ options:
   state:
     description:
     - Controls what the module manages.
-    - When C(present), installs the audit plugin (if needed), configures
+    - When V(present), installs the audit plugin, configures
       log format, creates or updates filters, and assigns users.
-    - When C(absent) without O(filter_name), uninstalls the audit plugin.
-    - When C(absent) with O(filter_name), removes the named filter and
+    - When V(absent) without O(filter_name), uninstalls the audit plugin.
+    - When V(absent) with O(filter_name), removes the named filter and
       all its user assignments.
-    - When C(absent) with O(filter_name) and O(users), removes only the
+    - When V(absent) with O(filter_name) and O(users), removes only the
       listed users from the filter without deleting the filter itself.
     type: str
     choices: ['present', 'absent']
