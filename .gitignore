@@ -3,6 +3,7 @@
 /changelogs/.plugin-cache.yaml
 .github/ee-tests-artifact*
 *.swp
+.ansible/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
