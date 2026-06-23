@@ -324,15 +324,6 @@
         fail_on_error: true
       register: result
 
-    # pymysql 0.10.0+ always returns "changed"
-    - name: Assert that startreplica is not changed
-      assert:
-        that:
-          - result is not changed
-      when:
-        - connector_name == 'pymysql'
-        - connector_version is version('0.10.0', '<')
-
     # Test stopreplica mode:
     - name: Stop replica
       mysql_replication:
@@ -350,24 +341,6 @@
     - name: Pause for 2 seconds to let the replication stop
       ansible.builtin.wait_for:
         timeout: 2
-
-    # Test stopreplica mode:
-    # pymysql 0.10.0+ always returns "changed"
-    - name: Stop replica that is no longer running
-      mysql_replication:
-        <<: *mysql_params
-        login_port: '{{ mysql_replica1_port }}'
-        mode: stopreplica
-        fail_on_error: true
-      register: result
-
-    - name: Assert that stopreplica is not changed
-      assert:
-        that:
-          - result is not changed
-      when:
-        - connector_name == 'pymysql'
-        - connector_version is version('0.10.0', '<')
 
     # master / slave related choices were removed in 3.0.0
     # https://github.com/ansible-collections/ansible.mysql/pull/252

@@ -42,8 +42,7 @@ jobs:
         connector_name:
           - pymysql
         connector_version:
-          - '0.9.3'
-          - '1.0.2'
+          - '0.10.1'
           - '1.1.1'
           - '1.2.0'
 

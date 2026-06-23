@@ -1,0 +1,6 @@
+minor_changes:
+  - >-
+    CI - PyMySQL 0.9.3 and 1.0.2 have been removed from the CI test matrix.
+    PyMySQL 0.9.3 is unmaintained and has an unfixed CVE-2024-36039.
+    PyMySQL 1.0.2 is redundant with 1.1.1 as both cover the same code path.
+    PyMySQL 0.10.1 has been promoted to the main test matrix.

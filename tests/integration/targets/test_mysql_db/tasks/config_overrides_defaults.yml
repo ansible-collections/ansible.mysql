@@ -15,39 +15,18 @@
 
 - name: Config overrides | Add blank line
   shell: 'echo "" >> {{ config_file }}'
-  when:
-    - >
-      connector_name != 'pymysql'
-      or (
-        connector_name == 'pymysql'
-        and connector_version is version('0.9.3', '>=')
-      )
 
 - name: Config overrides | Create include_dir
   file:
     path: '{{ include_dir }}'
     state: directory
     mode: '0777'
-  when:
-    - >
-      connector_name != 'pymysql'
-      or (
-        connector_name == 'pymysql'
-        and connector_version is version('0.9.3', '>=')
-      )
 
 - name: Config overrides | Add include_dir
   lineinfile:
     path: '{{ config_file }}'
     line: '!includedir {{ include_dir }}'
     insertafter: EOF
-  when:
-    - >
-      connector_name != 'pymysql'
-      or (
-        connector_name == 'pymysql'
-        and connector_version is version('0.9.3', '>=')
-      )
 
 - name: Config overrides | Create database using fake port to connect to, must fail
   mysql_db:

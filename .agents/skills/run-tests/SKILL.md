@@ -63,14 +63,14 @@ Integration tests live under `tests/integration/targets/<module_name>/`. Each ta
 The project provides a Makefile (documented in `TESTING.md`) that handles spinning up a primary database and two replicas in Podman containers. This is the recommended way to run integration tests locally:
 
 ```bash
-# Run all targets against MySQL 8.4.9 with pymysql 1.0.2
-make ansible="stable-2.17" db_engine_name="mysql" db_engine_version="8.4.9" connector_name="pymysql" connector_version="1.0.2"
+# Run all targets against MySQL 8.4.9 with pymysql 1.1.1
+make ansible="stable-2.17" db_engine_name="mysql" db_engine_version="8.4.9" connector_name="pymysql" connector_version="1.1.1"
 
 # Run a single target
-make ansible="stable-2.17" db_engine_name="mysql" db_engine_version="8.4.9" connector_name="pymysql" connector_version="1.0.2" target="test_mysql_info"
+make ansible="stable-2.17" db_engine_name="mysql" db_engine_version="8.4.9" connector_name="pymysql" connector_version="1.1.1" target="test_mysql_info"
 
 # MariaDB example
-make ansible="stable-2.17" db_engine_name="mariadb" db_engine_version="11.8.7" connector_name="pymysql" connector_version="1.0.2"
+make ansible="stable-2.17" db_engine_name="mariadb" db_engine_version="11.8.7" connector_name="pymysql" connector_version="1.1.1"
 ```
 
 Key Makefile options: `db_engine_name` (mysql/mariadb), `db_engine_version`, `connector_name` (pymysql), `connector_version`, `target` (single test target), `keep_containers_alive=1` (for debugging), `continue_on_errors=1`. See `TESTING.md` for the full list of supported versions and options.

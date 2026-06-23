@@ -299,7 +299,7 @@ connector_version:
   returned: always
   type: str
   sample:
-  - "1.0.2"
+  - "1.1.1"
   version_added: '3.6.0'
 '''
 

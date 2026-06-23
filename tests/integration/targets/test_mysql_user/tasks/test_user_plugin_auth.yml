@@ -400,18 +400,9 @@
         user_name: "{{ test_user_name }}"
 
     # ============================================================
-    # Test plugin auth switching from one type of plugin to another without an auth string or hash. The only other
-    # plugins that are loaded by default are sha2*, but these aren't compatible with pymysql < 0.9, so skip these tests
-    # for those versions.
+    # Test plugin auth switching from one type of plugin to another without an auth string or hash.
     #
-    - name: Plugin auth | Test plugin auth switching which doesn't work on pymysql < 0.9
-      when:
-        - >
-          connector_name != 'pymysql'
-          or (
-            connector_name == 'pymysql'
-            and connector_version is version('0.9', '>=')
-          )
+    - name: Plugin auth | Test plugin auth switching
       block:
 
         - name: Plugin auth | Create user with plugin auth (empty auth string)
@@ -549,14 +540,7 @@
     # Test auth plugin change
     #
 
-    - name: Plugin auth | Test plugin auth switching which doesn't work on pymysql < 0.9
-      when:
-        - >
-          connector_name != 'pymysql'
-          or (
-            connector_name == 'pymysql'
-            and connector_version is version('0.9', '>=')
-          )
+    - name: Plugin auth | Test plugin auth switching
       block:
 
         - name: Cleanup user

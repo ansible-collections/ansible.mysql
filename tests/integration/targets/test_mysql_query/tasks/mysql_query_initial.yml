@@ -394,25 +394,12 @@
     register: result
 
   # Issue https://github.com/ansible-collections/ansible.mysql/issues/268
-  - name: Assert that create table IF NOT EXISTS is not changed with pymysql
-    assert:
-      that:
-        # PyMySQL driver throws a warning for version before 0.10.0
-        - result is not changed
-    when:
-      - connector_name == 'pymysql'
-      - connector_version is version('0.10.0', '<')
-
-  # Issue https://github.com/ansible-collections/ansible.mysql/issues/268
   - name: Assert that create table IF NOT EXISTS is changed
     assert:
       that:
-        # pymysql 0.10.0+ drivers throw no warning,
-        # so it's impossible to figure out if the state was changed or not.
-        # We assume that it was for DDL queries by default in the code
         - result is changed
     when:
-      - connector_name == 'pymysql' and connector_version is version('0.10.0', '>')
+      - connector_name == 'pymysql'
 
   - name: Drop db {{ test_db }}
     mysql_query:
