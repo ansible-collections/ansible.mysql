@@ -119,6 +119,7 @@ For MariaDB, only Long Term releases are tested. When multiple LTS are available
 
 - pymysql 0.10.1
 - pymysql 1.1.1
+- pymysql 1.2.0
 
 ## External requirements
 
