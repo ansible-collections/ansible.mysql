@@ -81,7 +81,7 @@ The Makefile accept the following options
   - Choices:
     - "0.10.1" <- pymysql
     - "1.1.1" <- pymysql
-    - "1.2.0"
+    - "1.2.0" <- pymysql
   - Description: The version of the python package of the connector to use. This value is used to filter tests meant for other connectors.
 
 - `target`
