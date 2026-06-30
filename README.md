@@ -78,6 +78,7 @@ Every voice is important and every idea is valuable. If you have something on yo
   - [mysql_resource_group_info](https://docs.ansible.com/ansible/devel/collections/ansible/mysql/mysql_resource_group_info_module.html)
   - [mysql_role](https://docs.ansible.com/ansible/devel/collections/ansible/mysql/mysql_role_module.html)
   - [mysql_slow_log](https://docs.ansible.com/ansible/devel/collections/ansible/mysql/mysql_slow_log_module.html)
+  - [mysql_tls](https://docs.ansible.com/ansible/devel/collections/ansible/mysql/mysql_tls_module.html)
   - [mysql_user](https://docs.ansible.com/ansible/devel/collections/ansible/mysql/mysql_user_module.html)
   - [mysql_variables](https://docs.ansible.com/ansible/devel/collections/ansible/mysql/mysql_variables_module.html)
 

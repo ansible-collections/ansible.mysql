@@ -1,0 +1,8 @@
+---
+####################################################################
+# WARNING: These are designed specifically for Ansible tests       #
+# and should not be used as examples of how to write Ansible roles #
+####################################################################
+
+- name: MySQL TLS | Run integration checks
+  ansible.builtin.import_tasks: mysql_tls.yml
