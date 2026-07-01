@@ -623,10 +623,20 @@
       ignore_errors: true
       when: mysql_tls_tls_enabled
 
-    - name: MariaDB TLS | Assert plaintext connection is rejected
+    - name: MariaDB TLS | Check SSL status for implicit TLS connection
+      mysql_query:
+        <<: *mysql_params_mariadb
+        query: "SHOW STATUS LIKE 'Ssl_version'"
+      register: mariadb_tls_plain_query_ssl_status
+      when:
+        - mysql_tls_tls_enabled
+        - mariadb_tls_plain_query_when_secure is succeeded
+
+    - name: MariaDB TLS | Assert connection without explicit TLS options is rejected or encrypted
       ansible.builtin.assert:
         that:
-          - mariadb_tls_plain_query_when_secure is failed
+          - mariadb_tls_plain_query_when_secure is failed or mariadb_tls_plain_query_ssl_status.query_result[0] | length == 1
+          - mariadb_tls_plain_query_when_secure is failed or mariadb_tls_plain_query_ssl_status.query_result[0][0].Value | default('') | length > 0
       when: mysql_tls_tls_enabled
 
     - name: MariaDB TLS | TLS connection should succeed when secure transport is required
