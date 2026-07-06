@@ -39,7 +39,7 @@ options:
     type: int
   mixed_case_count:
     description:
-      - Minimum number of same-case letters required by the active password validation facility.
+      - Minimum number of lowercase and uppercase letters required each by the active password validation facility.
       - Supported on MySQL and on MariaDB C(simple_password_check).
     type: int
   number_count:
@@ -140,8 +140,9 @@ queries:
   description: List of executed or predicted SQL statements.
   returned: always
   type: list
+  elements: str
   sample:
-    - SET GLOBAL `validate_password.length` = 12
+    - SET GLOBAL `validate_password`.`length` = 12
 settings:
   description: Normalized requested settings after execution or prediction.
   returned: always
@@ -332,7 +333,7 @@ class MySQLPasswordPolicy(object):
 
     @staticmethod
     def format_set_query(variable_name, value, mode):
-        return "SET %s `%s` = %s" % (mode.upper(), variable_name, value)
+        return "SET %s %s = %s" % (mode.upper(), mysql_quote_identifier(variable_name, 'vars'), value)
 
 
 def main():

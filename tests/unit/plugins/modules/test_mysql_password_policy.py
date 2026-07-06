@@ -228,7 +228,7 @@ def test_configure_in_check_mode_predicts_mysql_persist_queries_without_writes()
 
     assert result['changed'] is True
     assert result['queries'] == [
-        "SET PERSIST `validate_password.length` = 12",
+        "SET PERSIST `validate_password`.`length` = 12",
         "SET PERSIST `password_history` = 5",
     ]
     assert cursor.variables['validate_password.length'] == '8'
@@ -348,6 +348,12 @@ def test_query_value_formats_policy_and_bool_for_sql():
 def test_format_set_query_formats_expected_statement():
     assert MySQLPasswordPolicy.format_set_query('password_history', 5, 'persist') == (
         "SET PERSIST `password_history` = 5"
+    )
+
+
+def test_format_set_query_quotes_dotted_variable_fragments():
+    assert MySQLPasswordPolicy.format_set_query('validate_password.length', 12, 'global') == (
+        "SET GLOBAL `validate_password`.`length` = 12"
     )
 
 
