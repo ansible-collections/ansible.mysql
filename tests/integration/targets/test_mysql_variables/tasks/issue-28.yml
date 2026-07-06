@@ -1,12 +1,12 @@
 ---
 - name: set fact tls_enabled
   ansible.builtin.command:
-    cmd: "{{ mysql_command }} \"-e SHOW VARIABLES LIKE 'have_ssl';\""
+    cmd: "{{ mysql_command }} \"-Nse SHOW VARIABLES LIKE 'ssl_ca';\""
   register: result
 
 - name: Set tls_enabled fact
   ansible.builtin.set_fact:
-    tls_enabled: "{{ 'YES' in result.stdout | bool | default('false', true) }}"
+    tls_enabled: "{{ result.stdout is search('ssl_ca\\s+.+') }}"
 
 - vars:
     mysql_parameters: &mysql_params
@@ -20,9 +20,8 @@
     # ============================================================
     - name: get server certificate
       ansible.builtin.copy:
-        content: "{{ lookup('pipe', \"openssl s_client -starttls mysql -connect localhost:3307 -showcerts 2>/dev/null </dev/null |  sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p'\") }}"
+        content: "{{ lookup('pipe', \"openssl s_client -starttls mysql -connect {{ mysql_host }}:{{ mysql_primary_port }} -showcerts 2>/dev/null </dev/null |  sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p'\") }}"
         dest: /tmp/cert.pem
-      delegate_to: localhost
 
     - name: Drop mysql user if exists
       ansible.mysql.mysql_user:

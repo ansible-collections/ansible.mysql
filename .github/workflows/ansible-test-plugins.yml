@@ -163,6 +163,7 @@ jobs:
           docker exec -e cnf=$prima_conf ${{ job.services.db_primary.id }} bash -c 'echo -e ${cnf//\\n/\n} > /etc/mysql/conf.d/replication.cnf'
           docker exec -e cnf=$repl1_conf ${{ job.services.db_replica1.id }} bash -c 'echo -e ${cnf//\\n/\n} > /etc/mysql/conf.d/replication.cnf'
           docker exec -e cnf=$repl2_conf ${{ job.services.db_replica2.id }} bash -c 'echo -e ${cnf//\\n/\n} > /etc/mysql/conf.d/replication.cnf'
+          bash tests/integration/setup_tls_harness.sh docker ${{ job.services.db_primary.id }} ${{ job.services.db_replica1.id }} ${{ job.services.db_replica2.id }}
           docker restart -t 30 ${{ job.services.db_primary.id }}
           docker restart -t 30 ${{ job.services.db_replica1.id }}
           docker restart -t 30 ${{ job.services.db_replica2.id }}

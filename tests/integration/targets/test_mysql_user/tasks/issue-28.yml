@@ -1,9 +1,9 @@
 ---
 - name: set fact tls_enabled
-  command: "{{ mysql_command }} \"-e SHOW VARIABLES LIKE 'have_ssl';\""
+  command: "{{ mysql_command }} \"-Nse SHOW VARIABLES LIKE 'ssl_ca';\""
   register: result
 - set_fact:
-    tls_enabled: "{{ 'YES' in result.stdout | bool | default('false', true) }}"
+    tls_enabled: "{{ result.stdout is search('ssl_ca\\s+.+') }}"
 
 - vars:
     mysql_parameters: &mysql_params
@@ -17,9 +17,8 @@
     # ============================================================
     - name: Issue-28 | Setup | Get server certificate
       copy:
-        content: "{{ lookup('pipe', \"openssl s_client -starttls mysql -connect {{ mysql_host }}:3307 -showcerts 2>/dev/null </dev/null |  sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p'\") }}"
+        content: "{{ lookup('pipe', \"openssl s_client -starttls mysql -connect {{ mysql_host }}:{{ mysql_primary_port }} -showcerts 2>/dev/null </dev/null |  sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p'\") }}"
         dest: /tmp/cert.pem
-      delegate_to: localhost
 
     - name: Issue-28 | Setup | Drop mysql user if exists
       mysql_user:

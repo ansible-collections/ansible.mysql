@@ -88,6 +88,7 @@ test-integration:
 	podman exec -e cnf="$$prima_conf" primary bash -c 'echo -e "$${cnf//\\n/\n}" > /etc/mysql/conf.d/replication.cnf'; \
 	podman exec -e cnf="$$repl1_conf" replica1 bash -c 'echo -e "$${cnf//\\n/\n}" > /etc/mysql/conf.d/replication.cnf'; \
 	podman exec -e cnf="$$repl2_conf" replica2 bash -c 'echo -e "$${cnf//\\n/\n}" > /etc/mysql/conf.d/replication.cnf'
+	bash tests/integration/setup_tls_harness.sh podman primary replica1 replica2
 	# Don't restart a container unless it is healthy
 	while ! podman healthcheck run primary && [[ "$$SECONDS" -lt 120 ]]; do sleep 1; done
 	podman restart -t 30 primary

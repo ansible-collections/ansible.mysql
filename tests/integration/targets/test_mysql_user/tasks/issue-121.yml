@@ -11,9 +11,8 @@
 
     - name: Issue-121 | Setup | Get server certificate
       copy:
-        content: "{{ lookup('pipe', \"openssl s_client -starttls mysql -connect {{ mysql_host }}:3307 -showcerts 2>/dev/null </dev/null | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p'\") }}"
+        content: "{{ lookup('pipe', \"openssl s_client -starttls mysql -connect {{ mysql_host }}:{{ mysql_primary_port }} -showcerts 2>/dev/null </dev/null | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p'\") }}"
         dest: /tmp/cert.pem
-      delegate_to: localhost
 
     - name: Issue-121 | Drop mysql user if exists
       mysql_user:
