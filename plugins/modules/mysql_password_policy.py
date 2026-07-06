@@ -137,7 +137,7 @@ EXAMPLES = r'''
 
 RETURN = r'''
 queries:
-  description: List of executed or predicted SQL statements.
+  description: List of executed or predicted (in check mode) SQL statements.
   returned: always
   type: list
   elements: str
