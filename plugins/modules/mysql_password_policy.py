@@ -144,7 +144,7 @@ queries:
   sample:
     - SET GLOBAL `validate_password`.`length` = 12
 settings:
-  description: Normalized requested settings after execution or prediction.
+  description: Normalized requested settings after execution or prediction (in check mode).
   returned: always
   type: dict
   sample:
