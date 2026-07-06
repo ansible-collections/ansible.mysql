@@ -33,6 +33,7 @@
       mysql_user:
         <<: *mysql_params
         name: "{{ user_name_1 }}"
+        host: "%"
         password: "{{ user_password_1 }}"
         priv: '*.*:ALL,GRANT'
         tls_requires:
@@ -81,5 +82,5 @@
       mysql_user:
         <<: *mysql_params
         name: '{{ user_name_1 }}'
-        host: '{{ gateway_addr }}'
+        host_all: true
         state: absent
