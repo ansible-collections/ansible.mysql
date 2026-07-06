@@ -149,8 +149,11 @@ class FakeCursor(object):
             self._rows = [{'Value': active_variables.get(variable_name, '')}]
             return
 
-        if query.startswith("SHOW REPLICA '") and query.endswith("' STATUS"):
-            connection_name = query[len("SHOW REPLICA '"): -len("' STATUS")]
+        if (
+            query.startswith("SHOW REPLICA '") or query.startswith("SHOW SLAVE '")
+        ) and query.endswith("' STATUS"):
+            prefix = "SHOW REPLICA '" if query.startswith("SHOW REPLICA '") else "SHOW SLAVE '"
+            connection_name = query[len(prefix): -len("' STATUS")]
             active_variables = self.connection_variables.get(connection_name, {})
             self._rows = [{
                 'Replicate_Do_DB': active_variables.get('replicate_do_db', ''),
@@ -469,6 +472,38 @@ def test_get_mariadb_filter_values_uses_connection_status_context():
     ]
 
 
+def test_get_mariadb_filter_values_uses_legacy_slave_status_context():
+    _require_module()
+
+    cursor = CursorStub([[
+        {
+            'Replicate_Do_DB': 'app,reporting',
+            'Replicate_Ignore_DB': '',
+            'Replicate_Do_Table': 'app.orders',
+            'Replicate_Ignore_Table': '',
+            'Replicate_Wild_Do_Table': 'reporting.sales_%',
+            'Replicate_Wild_Ignore_Table': '',
+        }
+    ]])
+
+    assert get_mariadb_filter_values(
+        ModuleStub(),
+        cursor,
+        '10.0.1-MariaDB',
+        connection_name='analytics',
+    ) == {
+        'replicate_do_db': 'app,reporting',
+        'replicate_ignore_db': '',
+        'replicate_do_table': 'app.orders',
+        'replicate_ignore_table': '',
+        'replicate_wild_do_table': 'reporting.sales_%',
+        'replicate_wild_ignore_table': '',
+    }
+    assert cursor.executed == [
+        ("SHOW SLAVE 'analytics' STATUS", None),
+    ]
+
+
 def test_get_mariadb_filter_values_reads_global_variables_without_connection_name():
     _require_module()
 
@@ -632,6 +667,18 @@ def test_apply_rejects_invalid_table_filter_value():
         manager.apply({'replicate_do_table': ['missing_separator']})
 
     assert str(exc_info.value) == 'replicate_do_table values must use database.table syntax: missing_separator'
+
+
+@pytest.mark.parametrize('param', ('replicate_wild_do_table', 'replicate_wild_ignore_table'))
+def test_apply_rejects_invalid_wildcard_filter_value(param):
+    _require_module()
+
+    manager = MySQLReplicationFilter(ModuleStub(check_mode=False), FakeCursor(), 'mysql', '8.4.0')
+
+    with pytest.raises(RuntimeError) as exc_info:
+        manager.apply({param: ['missing_separator']})
+
+    assert str(exc_info.value) == '%s values must use database.table syntax: missing_separator' % param
 
 
 def test_apply_mariadb_check_mode_predicts_changes_without_writes():

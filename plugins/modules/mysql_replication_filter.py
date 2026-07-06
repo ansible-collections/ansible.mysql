@@ -18,6 +18,7 @@ description:
   - MySQL uses C(CHANGE REPLICATION FILTER).
   - MariaDB uses C(SET GLOBAL replicate_*) variables.
   - Changes are runtime only and are not persisted across restart by this module.
+  - Persist filter settings separately through server configuration if they must survive a restart.
 
 author:
   - Ron Gershburg (@ronger4)
@@ -54,12 +55,14 @@ options:
   replicate_wild_do_table:
     description:
       - Wildcard table patterns that should be replicated.
+      - Values must use C(database.table) syntax with C(%) and C(_) wildcards.
       - Provide an empty list to clear the filter.
     type: list
     elements: str
   replicate_wild_ignore_table:
     description:
       - Wildcard table patterns that should be ignored during replication.
+      - Values must use C(database.table) syntax with C(%) and C(_) wildcards.
       - Provide an empty list to clear the filter.
     type: list
     elements: str
@@ -96,10 +99,42 @@ EXAMPLES = r'''
     replicate_ignore_db:
       - audit
 
+- name: Replicate selected tables on a MySQL replica
+  ansible.mysql.mysql_replication_filter:
+    login_unix_socket: /run/mysqld/mysqld.sock
+    replicate_do_table:
+      - app.orders
+      - reporting.summary
+
+- name: Set wildcard filters on a MySQL replica
+  ansible.mysql.mysql_replication_filter:
+    login_unix_socket: /run/mysqld/mysqld.sock
+    replicate_wild_do_table:
+      - app.%
+      - reporting.sales_%
+    replicate_wild_ignore_table:
+      - archive.old_%
+      - tmp.%
+
+- name: Set multiple MySQL filters in one task
+  ansible.mysql.mysql_replication_filter:
+    login_unix_socket: /run/mysqld/mysqld.sock
+    replicate_do_db:
+      - app
+    replicate_ignore_table:
+      - archive.events
+
 - name: Set one channel-specific MySQL filter
   ansible.mysql.mysql_replication_filter:
     login_unix_socket: /run/mysqld/mysqld.sock
     channel: analytics
+    replicate_do_db:
+      - reporting
+
+- name: Set one named MariaDB replication filter
+  ansible.mysql.mysql_replication_filter:
+    login_unix_socket: /run/mysqld/mysqld.sock
+    connection_name: analytics
     replicate_do_db:
       - reporting
 
@@ -115,10 +150,52 @@ queries:
   returned: always
   type: list
   elements: str
+  sample:
+    - CHANGE REPLICATION FILTER REPLICATE_DO_DB = (`app`,`reporting`)
 filters:
   description: Effective normalized filter state after execution or prediction.
   returned: always
   type: dict
+  contains:
+    replicate_do_db:
+      description: Databases that should be replicated.
+      returned: always
+      type: list
+      elements: str
+    replicate_ignore_db:
+      description: Databases that should be ignored during replication.
+      returned: always
+      type: list
+      elements: str
+    replicate_do_table:
+      description: Fully qualified tables that should be replicated.
+      returned: always
+      type: list
+      elements: str
+    replicate_ignore_table:
+      description: Fully qualified tables that should be ignored during replication.
+      returned: always
+      type: list
+      elements: str
+    replicate_wild_do_table:
+      description: Wildcard table patterns that should be replicated.
+      returned: always
+      type: list
+      elements: str
+    replicate_wild_ignore_table:
+      description: Wildcard table patterns that should be ignored during replication.
+      returned: always
+      type: list
+      elements: str
+  sample:
+    replicate_do_db:
+      - app
+      - reporting
+    replicate_ignore_db: []
+    replicate_do_table: []
+    replicate_ignore_table: []
+    replicate_wild_do_table: []
+    replicate_wild_ignore_table: []
 '''
 
 from ansible.module_utils.basic import AnsibleModule
@@ -339,7 +416,7 @@ def get_mariadb_filter_values(module, cursor, server_version, connection_name=''
                 'replicate_wild_do_table': row.get('Replicate_Wild_Do_Table', ''),
                 'replicate_wild_ignore_table': row.get('Replicate_Wild_Ignore_Table', ''),
             }
-        return dict((variable_name, '') for variable_name in FILTER_DEFINITIONS)
+        return dict((param, '') for param in FILTER_DEFINITIONS)
 
     variables = {}
     for definition in FILTER_DEFINITIONS.values():

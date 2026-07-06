@@ -47,7 +47,6 @@
         replicate_wild_ignore_table: []
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Re-clear MySQL global filters baseline
       ansible.mysql.mysql_replication_filter:
@@ -62,7 +61,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL global baseline clear idempotency
       ansible.builtin.assert:
@@ -70,7 +68,6 @@
           - result is not changed
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Apply MySQL global filters in check mode
       ansible.mysql.mysql_replication_filter:
@@ -86,7 +83,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL global check mode result
       ansible.builtin.assert:
@@ -101,7 +97,6 @@
           - result.filters.replicate_wild_ignore_table == replicate_wild_ignore_table_values
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Verify MySQL global filters stayed unchanged after check mode
       ansible.mysql.mysql_query:
@@ -135,7 +130,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL global filters stayed unchanged after check mode
       ansible.builtin.assert:
@@ -148,7 +142,6 @@
           - result.query_result[5] | length == 0 or result.query_result[5][0]['FILTER_RULE'] == ''
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Apply MySQL global filters
       ansible.mysql.mysql_replication_filter:
@@ -163,7 +156,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL global apply result
       ansible.builtin.assert:
@@ -178,7 +170,6 @@
           - result.filters.replicate_wild_ignore_table == replicate_wild_ignore_table_values
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Verify MySQL global filters in Performance Schema
       ansible.mysql.mysql_query:
@@ -212,7 +203,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL global filter state
       ansible.builtin.assert:
@@ -225,7 +215,6 @@
           - result.query_result[5][0]['FILTER_RULE'] == replicate_wild_ignore_table_csv
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Re-apply MySQL global filters
       ansible.mysql.mysql_replication_filter:
@@ -240,7 +229,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL global idempotency
       ansible.builtin.assert:
@@ -248,7 +236,6 @@
           - result is not changed
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Clear MySQL global filters
       ansible.mysql.mysql_replication_filter:
@@ -263,7 +250,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL global clear result
       ansible.builtin.assert:
@@ -272,7 +258,6 @@
           - result.queries | length == 6
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Verify MySQL global filters were cleared
       ansible.mysql.mysql_query:
@@ -306,7 +291,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL global filters were cleared
       ansible.builtin.assert:
@@ -319,7 +303,6 @@
           - result.query_result[5] | length == 0 or result.query_result[5][0]['FILTER_RULE'] == ''
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Re-clear MySQL global filters
       ansible.mysql.mysql_replication_filter:
@@ -334,7 +317,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL global clear idempotency
       ansible.builtin.assert:
@@ -342,7 +324,6 @@
           - result is not changed
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Get primary status for MySQL channel tests
       ansible.mysql.mysql_replication:
@@ -352,7 +333,6 @@
       register: mysql_primary_status
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Configure MySQL channel on replica2
       ansible.mysql.mysql_replication:
@@ -369,7 +349,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL channel configuration
       ansible.builtin.assert:
@@ -378,7 +357,6 @@
           - result.queries | length == 1
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Clear MySQL channel filter baseline
       ansible.mysql.mysql_replication_filter:
@@ -388,7 +366,6 @@
         replicate_do_db: []
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Re-clear MySQL channel filter baseline
       ansible.mysql.mysql_replication_filter:
@@ -399,7 +376,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL channel baseline clear idempotency
       ansible.builtin.assert:
@@ -407,7 +383,6 @@
           - result is not changed
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Apply MySQL channel filter in check mode
       ansible.mysql.mysql_replication_filter:
@@ -420,7 +395,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL channel check mode result
       ansible.builtin.assert:
@@ -430,7 +404,6 @@
           - result.filters.replicate_do_db == ['reporting']
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Verify MySQL channel filter stayed unchanged after check mode
       ansible.mysql.mysql_query:
@@ -444,7 +417,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL channel filter stayed unchanged after check mode
       ansible.builtin.assert:
@@ -452,7 +424,6 @@
           - result.query_result[0] | length == 0 or result.query_result[0][0]['FILTER_RULE'] == ''
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Apply MySQL channel filter
       ansible.mysql.mysql_replication_filter:
@@ -464,7 +435,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL channel apply result
       ansible.builtin.assert:
@@ -474,7 +444,6 @@
           - result.filters.replicate_do_db == ['reporting']
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Verify MySQL channel filter in Performance Schema
       ansible.mysql.mysql_query:
@@ -488,7 +457,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL channel filter state
       ansible.builtin.assert:
@@ -496,7 +464,6 @@
           - result.query_result[0][0]['FILTER_RULE'] == 'reporting'
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Re-apply MySQL channel filter
       ansible.mysql.mysql_replication_filter:
@@ -508,7 +475,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL channel idempotency
       ansible.builtin.assert:
@@ -516,7 +482,6 @@
           - result is not changed
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Clear MySQL channel filter
       ansible.mysql.mysql_replication_filter:
@@ -527,7 +492,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL channel clear result
       ansible.builtin.assert:
@@ -536,7 +500,6 @@
           - result.queries | length == 1
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Verify MySQL channel filter was cleared
       ansible.mysql.mysql_query:
@@ -550,7 +513,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL channel filter was cleared
       ansible.builtin.assert:
@@ -558,7 +520,6 @@
           - result.query_result[0] | length == 0 or result.query_result[0][0]['FILTER_RULE'] == ''
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Re-clear MySQL channel filter
       ansible.mysql.mysql_replication_filter:
@@ -569,7 +530,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL channel clear idempotency
       ansible.builtin.assert:
@@ -577,7 +537,6 @@
           - result is not changed
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Reset MySQL channel for cleanup
       ansible.mysql.mysql_replication:
@@ -588,7 +547,6 @@
       register: result
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Assert MySQL channel cleanup reset
       ansible.builtin.assert:
@@ -597,7 +555,6 @@
           - result.queries == ["RESET SLAVE ALL FOR CHANNEL '{{ test_channel }}'"] or result.queries == ["RESET REPLICA ALL FOR CHANNEL '{{ test_channel }}'"]
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Wait for MySQL primary replica list to clear after channel cleanup
       ansible.mysql.mysql_query:
@@ -610,7 +567,6 @@
       delay: 1
       when:
         - db_engine == 'mysql'
-        - db_version is version('9.0', '<')
 
     - name: Replication filter | Start replica1 before MariaDB global tests
       ansible.mysql.mysql_replication:
@@ -1009,7 +965,24 @@
       ansible.builtin.assert:
         that:
           - result is changed
+          - result.queries == ["SET GLOBAL `replicate_do_db` = 'reporting'"]
           - result.filters.replicate_do_db == ['reporting']
+      when: db_engine == 'mariadb'
+
+    - name: Replication filter | Verify MariaDB connection_name filter after apply
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        login_port: '{{ mysql_replica2_port }}'
+        query: >-
+          SHOW {{ 'REPLICA' if db_version is version('10.5.1', '>=') else 'SLAVE' }}
+          '{{ test_connection_name }}' STATUS
+      register: result
+      when: db_engine == 'mariadb'
+
+    - name: Replication filter | Assert MariaDB connection_name filter state after apply
+      ansible.builtin.assert:
+        that:
+          - result.query_result[0][0]['Replicate_Do_DB'] == 'reporting'
       when: db_engine == 'mariadb'
 
     - name: Replication filter | Re-apply MariaDB connection_name filter
@@ -1042,6 +1015,22 @@
         that:
           - result is changed
           - result.queries == ["SET GLOBAL `replicate_do_db` = ''"]
+      when: db_engine == 'mariadb'
+
+    - name: Replication filter | Verify MariaDB connection_name filter after clear
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        login_port: '{{ mysql_replica2_port }}'
+        query: >-
+          SHOW {{ 'REPLICA' if db_version is version('10.5.1', '>=') else 'SLAVE' }}
+          '{{ test_connection_name }}' STATUS
+      register: result
+      when: db_engine == 'mariadb'
+
+    - name: Replication filter | Assert MariaDB connection_name filter state after clear
+      ansible.builtin.assert:
+        that:
+          - result.query_result[0][0]['Replicate_Do_DB'] == ''
       when: db_engine == 'mariadb'
 
     - name: Replication filter | Re-clear MariaDB connection_name filter
