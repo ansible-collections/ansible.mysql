@@ -75,8 +75,8 @@ options:
   mode:
     description:
       - How supported MySQL variables are set.
-      - C(global) uses C(SET GLOBAL) and does not survive restarts by itself.
-      - C(persist) uses C(SET PERSIST) on MySQL.
+      - V(global) uses C(SET GLOBAL) and does not survive restarts by itself.
+      - V(persist) uses C(SET PERSIST) on MySQL.
       - Supported only on MySQL.
     type: str
     choices: [global, persist]
