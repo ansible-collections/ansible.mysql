@@ -5,6 +5,7 @@ __metaclass__ = type
 
 import pytest
 
+from ansible_collections.ansible.mysql.plugins.modules import mysql_tls as mysql_tls_module
 from ansible_collections.ansible.mysql.plugins.modules.mysql_tls import MySQLTLS
 
 
@@ -18,8 +19,11 @@ class FakeCursor:
     TLS_VARS = frozenset(('ssl_cert', 'ssl_key', 'ssl_ca',
                           'require_secure_transport', 'tls_version'))
 
-    def __init__(self, variables=None):
+    def __init__(self, variables=None, server_version='8.0.34', write_error=None, reload_error=None):
         self.variables = dict(variables or {})
+        self.server_version = server_version
+        self.write_error = write_error
+        self.reload_error = reload_error
         self.executed = []
         self._rows = []
 
@@ -27,6 +31,10 @@ class FakeCursor:
         self.executed.append((query, params))
 
         upper = query.strip().upper()
+
+        if upper.startswith("SELECT VERSION()"):
+            self._rows = [(self.server_version,)]
+            return
 
         if upper.startswith("SHOW") and "VARIABLE_NAME" in upper.upper():
             var_name = params[0]
@@ -37,6 +45,8 @@ class FakeCursor:
             return
 
         if upper.startswith("SET GLOBAL ") or upper.startswith("SET PERSIST "):
+            if self.write_error is not None:
+                raise self.write_error
             # Extract variable name between backticks
             var_name = query.split('`')[1]
             self.variables[var_name] = params[0]
@@ -44,6 +54,8 @@ class FakeCursor:
             return
 
         if upper == "ALTER INSTANCE RELOAD TLS":
+            if self.reload_error is not None:
+                raise self.reload_error
             self._rows = []
             return
 
@@ -61,7 +73,11 @@ class ModuleStub:
         raise RuntimeError(kwargs.get('msg', 'fail_json called'))
 
 
-def _make_mysql_cursor(overrides=None):
+class DummyDriverError(Exception):
+    pass
+
+
+def _make_mysql_cursor(overrides=None, server_version='8.0.34', write_error=None, reload_error=None):
     """Return a FakeCursor with reasonable MySQL TLS defaults."""
     defaults = {
         'ssl_cert': '',
@@ -72,17 +88,12 @@ def _make_mysql_cursor(overrides=None):
     }
     if overrides:
         defaults.update(overrides)
-    return FakeCursor(defaults)
-
-
-def _make_mariadb_cursor(overrides=None):
-    """Return a FakeCursor representing a MariaDB server (minimal TLS variables)."""
-    defaults = {
-        'require_secure_transport': 'OFF',
-    }
-    if overrides:
-        defaults.update(overrides)
-    return FakeCursor(defaults)
+    return FakeCursor(
+        defaults,
+        server_version=server_version,
+        write_error=write_error,
+        reload_error=reload_error,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +175,55 @@ def test_configure_returns_effective_settings():
     assert 'ssl_cert' not in result['settings']
 
 
+def test_configure_fails_when_tls_setting_is_not_available():
+    cursor = _make_mysql_cursor({'tls_version': None})
+
+    tls = MySQLTLS(ModuleStub(), cursor, 'mysql')
+
+    with pytest.raises(RuntimeError) as exc_info:
+        tls.configure({})
+
+    assert 'TLS setting "tls_version" is not available on this server.' == str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# MySQL - version guard
+# ---------------------------------------------------------------------------
+
+def test_mysql_fails_for_tls_context_change_before_8_0_16():
+    cursor = _make_mysql_cursor(server_version='8.0.15')
+
+    tls = MySQLTLS(ModuleStub(), cursor, 'mysql', server_version='8.0.15')
+
+    with pytest.raises(RuntimeError) as exc_info:
+        tls.configure({'server_cert': '/etc/mysql/ssl/server-cert.pem'})
+
+    assert '8.0.16' in str(exc_info.value)
+    assert 'server_cert' in str(exc_info.value)
+
+
+def test_mysql_fails_for_reload_before_8_0_16():
+    cursor = _make_mysql_cursor(server_version='8.0.15')
+
+    tls = MySQLTLS(ModuleStub(), cursor, 'mysql', server_version='8.0.15')
+
+    with pytest.raises(RuntimeError) as exc_info:
+        tls.configure({'require_secure_transport': True}, reload=True)
+
+    assert '8.0.16' in str(exc_info.value)
+    assert 'reload' in str(exc_info.value).lower()
+
+
+def test_mysql_allows_require_secure_transport_before_8_0_16():
+    cursor = _make_mysql_cursor(server_version='5.7.35')
+
+    tls = MySQLTLS(ModuleStub(), cursor, 'mysql', server_version='5.7.35')
+    result = tls.configure({'require_secure_transport': True})
+
+    assert result['changed'] is True
+    assert cursor.variables['require_secure_transport'] == 'ON'
+
+
 # ---------------------------------------------------------------------------
 # MySQL - check mode
 # ---------------------------------------------------------------------------
@@ -239,6 +299,63 @@ def test_configure_tls_context_change_does_not_reload_by_default():
     )
 
 
+def test_configure_does_not_swallow_non_driver_write_errors():
+    cursor = _make_mysql_cursor(write_error=TypeError('bad write parameters'))
+
+    tls = MySQLTLS(ModuleStub(), cursor, 'mysql', server_version='8.0.34')
+
+    with pytest.raises(TypeError) as exc_info:
+        tls.configure({'require_secure_transport': True})
+
+    assert 'bad write parameters' in str(exc_info.value)
+
+
+def test_configure_does_not_swallow_non_driver_reload_errors():
+    cursor = _make_mysql_cursor(reload_error=TypeError('bad reload call'))
+
+    tls = MySQLTLS(ModuleStub(), cursor, 'mysql', server_version='8.0.34')
+
+    with pytest.raises(TypeError) as exc_info:
+        tls.configure({'require_secure_transport': True}, reload=True)
+
+    assert 'bad reload call' in str(exc_info.value)
+
+
+def test_configure_surfaces_driver_write_errors(monkeypatch):
+    cursor = _make_mysql_cursor(write_error=DummyDriverError('db write failure'))
+
+    monkeypatch.setattr(
+        mysql_tls_module,
+        'mysql_driver',
+        type('FakeDriver', (), {'Error': DummyDriverError}),
+    )
+
+    tls = MySQLTLS(ModuleStub(), cursor, 'mysql', server_version='8.0.34')
+
+    with pytest.raises(RuntimeError) as exc_info:
+        tls.configure({'require_secure_transport': True})
+
+    assert 'db write failure' in str(exc_info.value)
+
+
+def test_configure_surfaces_driver_reload_errors(monkeypatch):
+    cursor = _make_mysql_cursor(reload_error=DummyDriverError('db reload failure'))
+
+    monkeypatch.setattr(
+        mysql_tls_module,
+        'mysql_driver',
+        type('FakeDriver', (), {'Error': DummyDriverError}),
+    )
+
+    tls = MySQLTLS(ModuleStub(), cursor, 'mysql', server_version='8.0.34')
+
+    with pytest.raises(RuntimeError) as exc_info:
+        tls.configure({'require_secure_transport': True}, reload=True)
+
+    assert "ALTER INSTANCE RELOAD TLS" in str(exc_info.value)
+    assert 'db reload failure' in str(exc_info.value)
+
+
 # ---------------------------------------------------------------------------
 # MySQL - persist mode
 # ---------------------------------------------------------------------------
@@ -272,91 +389,3 @@ def test_configure_with_persist_mode_uses_set_persist():
     assert result['changed'] is True
     assert any('SET PERSIST' in q for q in result['queries'])
     assert not any('SET GLOBAL' in q for q in result['queries'])
-
-
-# ---------------------------------------------------------------------------
-# MariaDB - restrictions
-# ---------------------------------------------------------------------------
-
-def test_mariadb_fails_for_server_cert():
-    cursor = _make_mariadb_cursor()
-
-    tls = MySQLTLS(ModuleStub(), cursor, 'mariadb')
-
-    with pytest.raises(RuntimeError) as exc_info:
-        tls.configure({'server_cert': '/etc/mysql/ssl/server-cert.pem'})
-
-    assert 'mariadb' in str(exc_info.value).lower() or 'not supported' in str(exc_info.value).lower()
-
-
-def test_mariadb_fails_for_server_key():
-    cursor = _make_mariadb_cursor()
-
-    tls = MySQLTLS(ModuleStub(), cursor, 'mariadb')
-
-    with pytest.raises(RuntimeError):
-        tls.configure({'server_key': '/etc/mysql/ssl/server-key.pem'})
-
-
-def test_mariadb_fails_for_server_ca():
-    cursor = _make_mariadb_cursor()
-
-    tls = MySQLTLS(ModuleStub(), cursor, 'mariadb')
-
-    with pytest.raises(RuntimeError):
-        tls.configure({'server_ca': '/etc/mysql/ssl/ca-cert.pem'})
-
-
-def test_mariadb_fails_for_tls_version():
-    cursor = _make_mariadb_cursor()
-
-    tls = MySQLTLS(ModuleStub(), cursor, 'mariadb')
-
-    with pytest.raises(RuntimeError) as exc_info:
-        tls.configure({'tls_version': 'TLSv1.3'})
-
-    assert 'mariadb' in str(exc_info.value).lower() or 'not supported' in str(exc_info.value).lower()
-
-
-def test_mariadb_fails_for_reload():
-    cursor = _make_mariadb_cursor({'require_secure_transport': 'OFF'})
-
-    tls = MySQLTLS(ModuleStub(), cursor, 'mariadb')
-
-    with pytest.raises(RuntimeError) as exc_info:
-        tls.configure({'require_secure_transport': True}, reload=True)
-
-    assert 'mariadb' in str(exc_info.value).lower() or 'not supported' in str(exc_info.value).lower()
-
-
-def test_mariadb_fails_for_persist_mode():
-    cursor = _make_mariadb_cursor({'require_secure_transport': 'OFF'})
-
-    tls = MySQLTLS(ModuleStub(), cursor, 'mariadb')
-
-    with pytest.raises(RuntimeError) as exc_info:
-        tls.configure({'require_secure_transport': True}, mode='persist')
-
-    message = str(exc_info.value).lower()
-    assert 'mariadb' in message
-    assert 'persist' in message
-
-
-def test_mariadb_supports_require_secure_transport():
-    cursor = _make_mariadb_cursor({'require_secure_transport': 'OFF'})
-
-    tls = MySQLTLS(ModuleStub(), cursor, 'mariadb')
-    result = tls.configure({'require_secure_transport': True})
-
-    assert result['changed'] is True
-    assert cursor.variables['require_secure_transport'] == 'ON'
-
-
-def test_mariadb_returns_unchanged_when_require_secure_transport_matches():
-    cursor = _make_mariadb_cursor({'require_secure_transport': 'ON'})
-
-    tls = MySQLTLS(ModuleStub(), cursor, 'mariadb')
-    result = tls.configure({'require_secure_transport': True})
-
-    assert result['changed'] is False
-    assert result['queries'] == []

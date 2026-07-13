@@ -11,14 +11,12 @@ DOCUMENTATION = r'''
 ---
 module: mysql_tls
 
-short_description: Manage MySQL or MariaDB TLS runtime settings
+short_description: Manage MySQL TLS runtime settings
 
 description:
-  - Manage selected TLS runtime settings for MySQL or MariaDB.
+  - Manage selected TLS runtime settings for MySQL.
   - MySQL supports certificate paths, TLS versions, secure transport, and explicit reloads.
-  - MariaDB support in this module is limited to the runtime C(require_secure_transport) setting.
-  - In this module, MariaDB does not support certificate path management, C(tls_version),
-    explicit reloads, or C(mode=persist).
+  - Runtime updates for MySQL certificate paths, TLS versions, and explicit reloads require MySQL 8.0.16 or later.
 
 author:
   - Ron Gershburg (@ronger4)
@@ -31,47 +29,41 @@ options:
     description:
       - Path to the TLS server certificate on the database host.
     type: path
-    version_added: '5.2.0'
   server_key:
     description:
       - Path to the TLS server private key on the database host.
     type: path
-    version_added: '5.2.0'
   server_ca:
     description:
       - Path to the TLS CA certificate on the database host.
     type: path
-    version_added: '5.2.0'
   require_secure_transport:
     description:
       - Require encrypted client connections.
+      - Enabling this without a working TLS configuration can lock out non-TLS clients.
     type: bool
-    version_added: '5.2.0'
   tls_version:
     description:
       - Allowed TLS protocol versions.
     type: str
-    version_added: '5.2.0'
   reload:
     description:
       - Execute C(ALTER INSTANCE RELOAD TLS) after applying changes.
       - Reload is explicit and is only attempted when settings actually change.
-      - MariaDB does not support O(reload) in this module.
+      - Runtime reload support requires MySQL 8.0.16 or later.
     type: bool
     default: false
-    version_added: '5.2.0'
   mode:
     description:
       - How runtime values are written.
       - C(global) uses C(SET GLOBAL).
       - C(persist) uses C(SET PERSIST) and depends on MySQL 8.0 or later support for that statement.
-      - In this module, C(persist) is supported only for MySQL and is rejected for MariaDB.
+      - For C(server_cert), C(server_key), C(server_ca), and C(tls_version), runtime writes require MySQL 8.0.16 or later.
     type: str
     choices:
       - global
       - persist
     default: global
-    version_added: '5.2.0'
 
 attributes:
   check_mode:
@@ -80,9 +72,7 @@ attributes:
     support: full
 
 notes:
-  - MariaDB support in this module is limited to runtime C(require_secure_transport).
-  - On MariaDB, O(server_cert), O(server_key), O(server_ca), O(tls_version), O(reload),
-    and O(mode=persist) are not supported by this module.
+  - On MySQL, O(server_cert), O(server_key), O(server_ca), O(tls_version), and O(reload) require MySQL 8.0.16 or later for runtime management.
 
 extends_documentation_fragment:
   - ansible.mysql.mysql
@@ -131,11 +121,13 @@ from ansible.module_utils.common.text.converters import to_native
 from ansible_collections.ansible.mysql.plugins.module_utils.database import mysql_quote_identifier
 from ansible_collections.ansible.mysql.plugins.module_utils.mysql import (
     get_server_implementation,
+    get_server_version,
     mysql_common_argument_spec,
     mysql_connect,
     mysql_driver,
     mysql_driver_fail_msg,
 )
+from ansible_collections.ansible.mysql.plugins.module_utils.version import LooseVersion
 
 
 PARAM_TO_VAR = {
@@ -146,13 +138,12 @@ PARAM_TO_VAR = {
     'tls_version': 'tls_version',
 }
 
-SUPPORTED_SETTINGS = {
-    'mysql': tuple(PARAM_TO_VAR.keys()),
-    'mariadb': ('require_secure_transport',),
-}
+SUPPORTED_SETTINGS = tuple(PARAM_TO_VAR.keys())
 
 MODE_CHOICES = ('global', 'persist')
 RELOAD_QUERY = 'ALTER INSTANCE RELOAD TLS'
+MYSQL_DYNAMIC_TLS_MIN_VERSION = '8.0.16'
+MYSQL_DYNAMIC_TLS_SETTINGS = ('server_cert', 'server_key', 'server_ca', 'tls_version')
 
 
 def get_variable(cursor, mysqlvar):
@@ -190,17 +181,20 @@ def set_variable(cursor, mysqlvar, value, mode, executed_queries):
         cursor.execute(query + "%s", (value,))
         cursor.fetchall()
     except Exception as e:
-        return to_native(e)
+        if mysql_driver is not None and isinstance(e, mysql_driver.Error):
+            return to_native(e)
+        raise
 
     executed_queries.append(query + format_query_value(value))
     return True
 
 
 class MySQLTLS(object):
-    def __init__(self, module, cursor, server_implementation):
+    def __init__(self, module, cursor, server_implementation, server_version=None):
         self.module = module
         self.cursor = cursor
         self.server_implementation = server_implementation
+        self.server_version = server_version
 
     def configure(self, desired_settings, reload=False, mode='global', check_mode=False):
         self.validate_server_support(desired_settings, reload, mode)
@@ -242,39 +236,50 @@ class MySQLTLS(object):
                 self.cursor.execute(RELOAD_QUERY)
                 self.cursor.fetchall()
             except Exception as e:
-                self.module.fail_json(msg="Cannot execute SQL '%s': %s" % (RELOAD_QUERY, to_native(e)))
+                if mysql_driver is not None and isinstance(e, mysql_driver.Error):
+                    self.module.fail_json(msg="Cannot execute SQL '%s': %s" % (RELOAD_QUERY, to_native(e)))
+                raise
 
             queries.append(RELOAD_QUERY)
 
         return dict(changed=changed, queries=queries, settings=effective_settings)
 
     def validate_server_support(self, desired_settings, reload, mode):
-        if self.server_implementation != 'mariadb':
+        if self.server_implementation != 'mysql':
+            self.module.fail_json(msg='mysql_tls supports MySQL only.', changed=False)
+
+        self.validate_mysql_tls_context_support(desired_settings, reload)
+
+    def validate_mysql_tls_context_support(self, desired_settings, reload):
+        if self.server_version is None:
             return
 
-        if mode == 'persist':
-            self.module.fail_json(
-                msg='MariaDB does not support mysql_tls mode "persist"',
-                changed=False,
-            )
+        if LooseVersion(self.server_version) >= LooseVersion(MYSQL_DYNAMIC_TLS_MIN_VERSION):
+            return
 
         unsupported_settings = [
             setting_name for setting_name, value in desired_settings.items()
-            if value is not None and setting_name not in SUPPORTED_SETTINGS['mariadb']
+            if value is not None and setting_name in MYSQL_DYNAMIC_TLS_SETTINGS
         ]
         if unsupported_settings:
             self.module.fail_json(
-                msg='MariaDB does not support mysql_tls setting "%s"' % unsupported_settings[0],
+                msg='mysql_tls setting "%s" requires MySQL %s or newer' % (
+                    unsupported_settings[0],
+                    MYSQL_DYNAMIC_TLS_MIN_VERSION,
+                ),
                 changed=False,
             )
 
         if reload:
-            self.module.fail_json(msg='MariaDB does not support mysql_tls reload', changed=False)
+            self.module.fail_json(
+                msg='mysql_tls reload requires MySQL %s or newer' % MYSQL_DYNAMIC_TLS_MIN_VERSION,
+                changed=False,
+            )
 
     def get_current_settings(self):
         settings = {}
 
-        for setting_name in SUPPORTED_SETTINGS[self.server_implementation]:
+        for setting_name in SUPPORTED_SETTINGS:
             variable_name = PARAM_TO_VAR[setting_name]
             value = get_variable(self.cursor, variable_name)
             if value is None:
@@ -355,7 +360,13 @@ def main():
         'tls_version': module.params['tls_version'],
     }
 
-    tls = MySQLTLS(module, cursor, get_server_implementation(cursor))
+    server_version = get_server_version(cursor)
+    tls = MySQLTLS(
+        module,
+        cursor,
+        get_server_implementation(cursor),
+        server_version=server_version,
+    )
 
     module.exit_json(
         **tls.configure(

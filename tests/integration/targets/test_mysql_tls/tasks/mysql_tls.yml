@@ -69,9 +69,27 @@
         mysql_tls_initial_persisted_version_value: "{{ (mysql_tls_initial_persisted_version.query_result[0] | length == 1) | ternary(mysql_tls_initial_persisted_version.query_result[0][0].persisted_value, '') }}"
       when: db_version is version('8.0', '>=')
 
+    - name: MySQL TLS | Read baseline persisted require_secure_transport state
+      mysql_query:
+        <<: *mysql_params
+        query: "SELECT VARIABLE_VALUE AS persisted_value FROM performance_schema.persisted_variables WHERE VARIABLE_NAME = 'require_secure_transport'"
+      register: mysql_tls_initial_persisted_require_secure_transport
+      when: db_version is version('8.0', '>=')
+
+    - name: MySQL TLS | Set baseline persisted require_secure_transport facts
+      ansible.builtin.set_fact:
+        mysql_tls_initial_persisted_require_secure_transport_present: "{{ mysql_tls_initial_persisted_require_secure_transport.query_result[0] | length == 1 }}"
+        mysql_tls_initial_persisted_require_secure_transport_value: "{{ (mysql_tls_initial_persisted_require_secure_transport.query_result[0] | length == 1) | ternary(mysql_tls_initial_persisted_require_secure_transport.query_result[0][0].persisted_value, '') }}"
+      when: db_version is version('8.0', '>=')
+
     - name: MySQL TLS | Set alternate tls_version for change-driven tests
       ansible.builtin.set_fact:
         mysql_tls_alt_version: "{{ 'TLSv1.2,TLSv1.3' if mysql_tls_initial.settings.tls_version == 'TLSv1.3' else 'TLSv1.3' }}"
+
+    - name: MySQL TLS | Set alternate require_secure_transport targets
+      ansible.builtin.set_fact:
+        mysql_tls_alt_require_secure_transport: "{{ mysql_tls_initial.settings.require_secure_transport != 'ON' }}"
+        mysql_tls_alt_require_secure_transport_value: "{{ 'OFF' if mysql_tls_initial.settings.require_secure_transport == 'ON' else 'ON' }}"
 
     # ============================================================
     # Test: tls_version in check mode, including reload prediction
@@ -129,6 +147,30 @@
         that:
           - mysql_tls_tls_enabled | bool
         fail_msg: test_mysql_tls requires harness-provisioned TLS for real transport checks.
+
+    - name: MySQL TLS | Predict require_secure_transport change in check mode
+      mysql_tls:
+        <<: *mysql_params
+        require_secure_transport: "{{ mysql_tls_alt_require_secure_transport }}"
+      check_mode: true
+      register: mysql_tls_require_secure_transport_check_mode
+      when: mysql_tls_tls_enabled
+
+    - name: MySQL TLS | Verify require_secure_transport after check mode
+      mysql_variables:
+        <<: *mysql_params
+        variable: require_secure_transport
+      register: mysql_tls_require_secure_transport_after_check_mode
+      when: mysql_tls_tls_enabled
+
+    - name: MySQL TLS | Assert require_secure_transport check mode did not mutate state
+      ansible.builtin.assert:
+        that:
+          - mysql_tls_require_secure_transport_check_mode is changed
+          - mysql_tls_require_secure_transport_check_mode.queries | length == 1
+          - mysql_tls_require_secure_transport_check_mode.queries[0] == 'SET GLOBAL `require_secure_transport` = ' ~ mysql_tls_alt_require_secure_transport_value
+          - mysql_tls_require_secure_transport_after_check_mode.msg == mysql_tls_initial.settings.require_secure_transport
+      when: mysql_tls_tls_enabled
 
     - name: MySQL TLS | Enable require_secure_transport
       mysql_tls:
@@ -288,6 +330,67 @@
         that:
           - mysql_tls_persist_idempotency is not changed
           - mysql_tls_persist_idempotency.queries == []
+      when: db_version is version('8.0', '>=')
+
+    - name: MySQL TLS | Set require_secure_transport in persist mode
+      mysql_tls:
+        <<: *mysql_tls_params
+        require_secure_transport: "{{ mysql_tls_alt_require_secure_transport }}"
+        mode: persist
+      register: mysql_tls_require_secure_transport_persist_result
+      when: db_version is version('8.0', '>=')
+
+    - name: MySQL TLS | Verify require_secure_transport after persist mode
+      mysql_variables:
+        <<: *mysql_tls_params
+        variable: require_secure_transport
+      register: mysql_tls_require_secure_transport_after_persist
+      when: db_version is version('8.0', '>=')
+
+    - name: MySQL TLS | Read persisted require_secure_transport value
+      mysql_query:
+        <<: *mysql_tls_params
+        query: "SELECT VARIABLE_VALUE AS persisted_value FROM performance_schema.persisted_variables WHERE VARIABLE_NAME = 'require_secure_transport'"
+      register: mysql_tls_persisted_require_secure_transport
+      when: db_version is version('8.0', '>=')
+
+    - name: MySQL TLS | Assert require_secure_transport persist mode result
+      ansible.builtin.assert:
+        that:
+          - mysql_tls_require_secure_transport_persist_result is changed
+          - mysql_tls_require_secure_transport_persist_result.queries | length == 1
+          - mysql_tls_require_secure_transport_persist_result.queries[0] == 'SET PERSIST `require_secure_transport` = ' ~ mysql_tls_alt_require_secure_transport_value
+          - mysql_tls_require_secure_transport_after_persist.msg == mysql_tls_alt_require_secure_transport_value
+          - mysql_tls_persisted_require_secure_transport.query_result[0] | length == 1
+          - mysql_tls_persisted_require_secure_transport.query_result[0][0].persisted_value == mysql_tls_alt_require_secure_transport_value
+      when: db_version is version('8.0', '>=')
+
+    - name: MySQL TLS | Re-run require_secure_transport persist mode for idempotency
+      mysql_tls:
+        <<: *mysql_tls_params
+        require_secure_transport: "{{ mysql_tls_alt_require_secure_transport }}"
+        mode: persist
+      register: mysql_tls_require_secure_transport_persist_idempotency
+      when: db_version is version('8.0', '>=')
+
+    - name: MySQL TLS | Assert require_secure_transport persist idempotency
+      ansible.builtin.assert:
+        that:
+          - mysql_tls_require_secure_transport_persist_idempotency is not changed
+          - mysql_tls_require_secure_transport_persist_idempotency.queries == []
+      when: db_version is version('8.0', '>=')
+
+    - name: MySQL TLS | Restore require_secure_transport runtime after persist test
+      mysql_tls:
+        <<: *mysql_tls_params
+        require_secure_transport: "{{ mysql_tls_initial.settings.require_secure_transport == 'ON' }}"
+      register: mysql_tls_require_secure_transport_runtime_restore
+      when: db_version is version('8.0', '>=')
+
+    - name: MySQL TLS | Assert require_secure_transport runtime restore after persist test
+      ansible.builtin.assert:
+        that:
+          - mysql_tls_require_secure_transport_runtime_restore.settings.require_secure_transport == mysql_tls_initial.settings.require_secure_transport
       when: db_version is version('8.0', '>=')
 
     # ============================================================
@@ -463,6 +566,67 @@
           - mysql_tls_cert_check_mode.queries[0] is search('^SET GLOBAL `ssl_cert` = ')
           - mysql_tls_ssl_cert_after_check_mode.msg == mysql_tls_dummy_server_cert
 
+    - name: MySQL TLS | Set certificate paths with explicit reload
+      mysql_tls:
+        <<: *mysql_params
+        server_cert: "{{ mysql_tls_initial.settings.server_cert }}"
+        server_key: "{{ mysql_tls_initial.settings.server_key }}"
+        server_ca: "{{ mysql_tls_initial.settings.server_ca }}"
+        reload: true
+      register: mysql_tls_cert_paths_reload_result
+      when: db_version is version('8.0.16', '>=')
+
+    - name: MySQL TLS | Verify ssl_cert after certificate path reload change
+      mysql_variables:
+        <<: *mysql_params
+        variable: ssl_cert
+      register: mysql_tls_ssl_cert_after_reload_change
+      when: db_version is version('8.0.16', '>=')
+
+    - name: MySQL TLS | Verify ssl_key after certificate path reload change
+      mysql_variables:
+        <<: *mysql_params
+        variable: ssl_key
+      register: mysql_tls_ssl_key_after_reload_change
+      when: db_version is version('8.0.16', '>=')
+
+    - name: MySQL TLS | Verify ssl_ca after certificate path reload change
+      mysql_variables:
+        <<: *mysql_params
+        variable: ssl_ca
+      register: mysql_tls_ssl_ca_after_reload_change
+      when: db_version is version('8.0.16', '>=')
+
+    - name: MySQL TLS | Assert certificate path reload result
+      ansible.builtin.assert:
+        that:
+          - mysql_tls_cert_paths_reload_result is changed
+          - "'SET GLOBAL `ssl_cert` =' in (mysql_tls_cert_paths_reload_result.queries | join(' '))"
+          - "'SET GLOBAL `ssl_key` =' in (mysql_tls_cert_paths_reload_result.queries | join(' '))"
+          - "'SET GLOBAL `ssl_ca` =' in (mysql_tls_cert_paths_reload_result.queries | join(' '))"
+          - "'ALTER INSTANCE RELOAD TLS' in mysql_tls_cert_paths_reload_result.queries"
+          - mysql_tls_ssl_cert_after_reload_change.msg == mysql_tls_initial.settings.server_cert
+          - mysql_tls_ssl_key_after_reload_change.msg == mysql_tls_initial.settings.server_key
+          - mysql_tls_ssl_ca_after_reload_change.msg == mysql_tls_initial.settings.server_ca
+      when: db_version is version('8.0.16', '>=')
+
+    - name: MySQL TLS | Re-run certificate path reload change for idempotency
+      mysql_tls:
+        <<: *mysql_params
+        server_cert: "{{ mysql_tls_initial.settings.server_cert }}"
+        server_key: "{{ mysql_tls_initial.settings.server_key }}"
+        server_ca: "{{ mysql_tls_initial.settings.server_ca }}"
+        reload: true
+      register: mysql_tls_cert_paths_reload_idempotency
+      when: db_version is version('8.0.16', '>=')
+
+    - name: MySQL TLS | Assert certificate path reload idempotency
+      ansible.builtin.assert:
+        that:
+          - mysql_tls_cert_paths_reload_idempotency is not changed
+          - mysql_tls_cert_paths_reload_idempotency.queries == []
+      when: db_version is version('8.0.16', '>=')
+
     - name: MySQL TLS | Restore baseline runtime settings
       mysql_tls:
         <<: *mysql_params
@@ -493,11 +657,38 @@
         - db_version is version('8.0', '>=')
         - not mysql_tls_initial_persisted_version_present
 
+    - name: MySQL TLS | Restore baseline persisted require_secure_transport value
+      mysql_variables:
+        <<: *mysql_tls_params
+        variable: require_secure_transport
+        value: "{{ mysql_tls_initial_persisted_require_secure_transport_value }}"
+        mode: persist_only
+      register: mysql_tls_restore_persisted_require_secure_transport
+      when:
+        - db_version is version('8.0', '>=')
+        - mysql_tls_initial_persisted_require_secure_transport_present
+
+    - name: MySQL TLS | Remove persisted require_secure_transport when baseline had none
+      mysql_query:
+        <<: *mysql_tls_params
+        query: "RESET PERSIST require_secure_transport"
+      register: mysql_tls_reset_persisted_require_secure_transport
+      when:
+        - db_version is version('8.0', '>=')
+        - not mysql_tls_initial_persisted_require_secure_transport_present
+
     - name: MySQL TLS | Read persisted tls_version after cleanup
       mysql_query:
         <<: *mysql_params
         query: "SELECT VARIABLE_VALUE AS persisted_value FROM performance_schema.persisted_variables WHERE VARIABLE_NAME = 'tls_version'"
       register: mysql_tls_persisted_version_after_cleanup
+      when: db_version is version('8.0', '>=')
+
+    - name: MySQL TLS | Read persisted require_secure_transport after cleanup
+      mysql_query:
+        <<: *mysql_tls_params
+        query: "SELECT VARIABLE_VALUE AS persisted_value FROM performance_schema.persisted_variables WHERE VARIABLE_NAME = 'require_secure_transport'"
+      register: mysql_tls_persisted_require_secure_transport_after_cleanup
       when: db_version is version('8.0', '>=')
 
     - name: MySQL TLS | Re-read runtime settings after restore
@@ -540,7 +731,26 @@
       ansible.builtin.assert:
         that:
           - mysql_tls_persisted_version_after_cleanup.query_result[0] | length == 0
-      when: db_version is version('8.0', '>=')
+      when:
+        - db_version is version('8.0', '>=')
+        - not mysql_tls_initial_persisted_version_present
+
+    - name: MySQL TLS | Assert persisted require_secure_transport row was restored
+      ansible.builtin.assert:
+        that:
+          - mysql_tls_persisted_require_secure_transport_after_cleanup.query_result[0] | length == 1
+          - mysql_tls_persisted_require_secure_transport_after_cleanup.query_result[0][0].persisted_value == mysql_tls_initial_persisted_require_secure_transport_value
+      when:
+        - db_version is version('8.0', '>=')
+        - mysql_tls_initial_persisted_require_secure_transport_present
+
+    - name: MySQL TLS | Assert persisted require_secure_transport row was removed
+      ansible.builtin.assert:
+        that:
+          - mysql_tls_persisted_require_secure_transport_after_cleanup.query_result[0] | length == 0
+      when:
+        - db_version is version('8.0', '>=')
+        - not mysql_tls_initial_persisted_require_secure_transport_present
 
   always:
     - name: MySQL TLS | Always restore secure transport baseline
@@ -588,211 +798,24 @@
         - not mysql_tls_initial_persisted_version_present
       ignore_errors: true
 
-- vars:
-    mysql_parameters: &mysql_params_mariadb
-      login_user: '{{ mysql_user }}'
-      login_password: '{{ mysql_password }}'
-      login_host: '{{ mysql_host }}'
-      login_port: '{{ mysql_primary_port }}'
-    mysql_tls_parameters: &mysql_tls_params_mariadb
-      login_user: '{{ mysql_user }}'
-      login_password: '{{ mysql_password }}'
-      login_host: '{{ mysql_host }}'
-      login_port: '{{ mysql_primary_port }}'
-      ca_cert: /tmp/mysql_tls_server_cert.pem
-      check_hostname: no
-
-  when: db_engine == 'mariadb'
-  block:
-
-    - name: MariaDB TLS | Get baseline settings (no changes expected)
-      mysql_tls:
-        <<: *mysql_params_mariadb
-      register: mariadb_tls_initial
-
-    - name: MariaDB TLS | Assert baseline result
-      ansible.builtin.assert:
-        that:
-          - mariadb_tls_initial is not changed
-          - mariadb_tls_initial.queries == []
-          - "'require_secure_transport' in mariadb_tls_initial.settings"
-
-    - name: MariaDB TLS | Assert test harness exposes TLS
-      ansible.builtin.assert:
-        that:
-          - mysql_tls_tls_enabled | bool
-        fail_msg: test_mysql_tls requires harness-provisioned TLS for real transport checks.
-
-    - name: MariaDB TLS | Enable require_secure_transport
-      mysql_tls:
-        <<: *mysql_params_mariadb
-        require_secure_transport: true
-      register: mariadb_tls_require_secure_transport
-      when: mysql_tls_tls_enabled
-
-    - name: MariaDB TLS | Assert require_secure_transport enable result
-      ansible.builtin.assert:
-        that:
-          - mariadb_tls_require_secure_transport is changed
-          - "'SET GLOBAL `require_secure_transport` = ON' in mariadb_tls_require_secure_transport.queries"
-      when: mysql_tls_tls_enabled
-
-    - name: MariaDB TLS | Re-run require_secure_transport enable for idempotency
-      mysql_tls:
-        <<: *mysql_tls_params_mariadb
-        require_secure_transport: true
-      register: mariadb_tls_require_secure_transport_idempotency
-      when: mysql_tls_tls_enabled
-
-    - name: MariaDB TLS | Assert require_secure_transport enable idempotency
-      ansible.builtin.assert:
-        that:
-          - mariadb_tls_require_secure_transport_idempotency is not changed
-          - mariadb_tls_require_secure_transport_idempotency.queries == []
-      when: mysql_tls_tls_enabled
-
-    - name: MariaDB TLS | Plain TCP connection should fail when secure transport is required
-      mysql_query:
-        <<: *mysql_params_mariadb
-        query: "SELECT 1 AS plain_connection"
-      register: mariadb_tls_plain_query_when_secure
-      ignore_errors: true
-      when: mysql_tls_tls_enabled
-
-    - name: MariaDB TLS | Check SSL status for implicit TLS connection
-      mysql_query:
-        <<: *mysql_params_mariadb
-        query: "SHOW STATUS LIKE 'Ssl_version'"
-      register: mariadb_tls_plain_query_ssl_status
+    - name: MySQL TLS | Always restore persisted require_secure_transport value
+      mysql_variables:
+        <<: *mysql_tls_params
+        variable: require_secure_transport
+        value: "{{ mysql_tls_initial_persisted_require_secure_transport_value }}"
+        mode: persist_only
       when:
-        - mysql_tls_tls_enabled
-        - mariadb_tls_plain_query_when_secure is succeeded
+        - db_version is version('8.0', '>=')
+        - mysql_tls_initial_persisted_require_secure_transport_present is defined
+        - mysql_tls_initial_persisted_require_secure_transport_present
+      ignore_errors: true
 
-    - name: MariaDB TLS | Assert connection without explicit TLS options is rejected or encrypted
-      ansible.builtin.assert:
-        that:
-          - mariadb_tls_plain_query_when_secure is failed or mariadb_tls_plain_query_ssl_status.query_result[0] | length == 1
-          - mariadb_tls_plain_query_when_secure is failed or mariadb_tls_plain_query_ssl_status.query_result[0][0].Value | default('') | length > 0
-      when: mysql_tls_tls_enabled
-
-    - name: MariaDB TLS | TLS connection should succeed when secure transport is required
+    - name: MySQL TLS | Always remove persisted require_secure_transport when baseline had none
       mysql_query:
-        <<: *mysql_tls_params_mariadb
-        query: "SELECT 1 AS tls_connection"
-      register: mariadb_tls_secure_query
-      when: mysql_tls_tls_enabled
-
-    - name: MariaDB TLS | Assert TLS connection succeeds
-      ansible.builtin.assert:
-        that:
-          - mariadb_tls_secure_query is succeeded
-          - mariadb_tls_secure_query.query_result[0][0].tls_connection | int == 1
-      when: mysql_tls_tls_enabled
-
-    - name: MariaDB TLS | Disable require_secure_transport over TLS
-      mysql_tls:
-        <<: *mysql_tls_params_mariadb
-        require_secure_transport: false
-      register: mariadb_tls_disable_secure_transport
-      when: mysql_tls_tls_enabled
-
-    - name: MariaDB TLS | Assert require_secure_transport was disabled safely
-      ansible.builtin.assert:
-        that:
-          - mariadb_tls_disable_secure_transport is changed
-          - "'SET GLOBAL `require_secure_transport` = OFF' in mariadb_tls_disable_secure_transport.queries"
-      when: mysql_tls_tls_enabled
-
-    - name: MariaDB TLS | Re-run require_secure_transport disable for idempotency
-      mysql_tls:
-        <<: *mysql_params_mariadb
-        require_secure_transport: false
-      register: mariadb_tls_disable_secure_transport_idempotency
-      when: mysql_tls_tls_enabled
-
-    - name: MariaDB TLS | Assert require_secure_transport disable idempotency
-      ansible.builtin.assert:
-        that:
-          - mariadb_tls_disable_secure_transport_idempotency is not changed
-          - mariadb_tls_disable_secure_transport_idempotency.queries == []
-      when: mysql_tls_tls_enabled
-
-    - name: MariaDB TLS | Plain TCP connection should work again after disabling secure transport
-      mysql_query:
-        <<: *mysql_params_mariadb
-        query: "SELECT 1 AS plain_connection_after_disable"
-      register: mariadb_tls_plain_query_after_disable
-      when: mysql_tls_tls_enabled
-
-    - name: MariaDB TLS | Assert plain TCP connection works again
-      ansible.builtin.assert:
-        that:
-          - mariadb_tls_plain_query_after_disable is succeeded
-          - mariadb_tls_plain_query_after_disable.query_result[0][0].plain_connection_after_disable | int == 1
-      when: mysql_tls_tls_enabled
-
-    - name: MariaDB TLS | server_cert should fail clearly
-      mysql_tls:
-        <<: *mysql_params_mariadb
-        server_cert: /tmp/mysql_tls-server-cert.pem
-      register: mariadb_tls_server_cert_failure
-      ignore_errors: true
-
-    - name: MariaDB TLS | Assert server_cert failure message
-      ansible.builtin.assert:
-        that:
-          - mariadb_tls_server_cert_failure is failed
-          - "'mariadb' in (mariadb_tls_server_cert_failure.msg | lower)"
-          - "'server_cert' in mariadb_tls_server_cert_failure.msg"
-
-    - name: MariaDB TLS | reload should fail clearly
-      mysql_tls:
-        <<: *mysql_params_mariadb
-        require_secure_transport: true
-        reload: true
-      register: mariadb_tls_reload_failure
-      ignore_errors: true
-
-    - name: MariaDB TLS | Assert reload failure message
-      ansible.builtin.assert:
-        that:
-          - mariadb_tls_reload_failure is failed
-          - "'mariadb' in (mariadb_tls_reload_failure.msg | lower)"
-          - "'reload' in (mariadb_tls_reload_failure.msg | lower)"
-
-    - name: MariaDB TLS | mode persist should fail clearly
-      mysql_tls:
-        <<: *mysql_params_mariadb
-        require_secure_transport: true
-        mode: persist
-      register: mariadb_tls_persist_failure
-      ignore_errors: true
-
-    - name: MariaDB TLS | Assert mode persist failure message
-      ansible.builtin.assert:
-        that:
-          - mariadb_tls_persist_failure is failed
-          - "'mariadb' in (mariadb_tls_persist_failure.msg | lower)"
-          - "'persist' in (mariadb_tls_persist_failure.msg | lower)"
-
-    - name: MariaDB TLS | Re-read runtime settings after tests
-      mysql_tls:
-        <<: *mysql_params_mariadb
-      register: mariadb_tls_restored
-
-    - name: MariaDB TLS | Assert baseline settings were restored
-      ansible.builtin.assert:
-        that:
-          - mariadb_tls_restored is not changed
-          - mariadb_tls_restored.settings == mariadb_tls_initial.settings
-
-  always:
-    - name: MariaDB TLS | Always restore secure transport baseline
-      mysql_tls:
-        <<: *mysql_tls_params_mariadb
-        require_secure_transport: "{{ mariadb_tls_initial.settings.require_secure_transport == 'ON' }}"
+        <<: *mysql_tls_params
+        query: "RESET PERSIST require_secure_transport"
       when:
-        - mysql_tls_tls_enabled | default(false)
-        - mariadb_tls_initial is defined
-        - mariadb_tls_initial.settings is defined
+        - db_version is version('8.0', '>=')
+        - mysql_tls_initial_persisted_require_secure_transport_present is defined
+        - not mysql_tls_initial_persisted_require_secure_transport_present
       ignore_errors: true
