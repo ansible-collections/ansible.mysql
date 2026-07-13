@@ -1,0 +1,11 @@
+---
+####################################################################
+# WARNING: These are designed specifically for Ansible tests       #
+# and should not be used as examples of how to write Ansible roles #
+####################################################################
+
+- name: Tablespace | Run integration checks
+  block:
+    - name: Tablespace | Include MySQL lifecycle checks
+      ansible.builtin.include_tasks: mysql.yml
+      when: db_engine == 'mysql'

@@ -14,6 +14,8 @@ action_groups:
     - mysql_resource_group_info
     - mysql_role
     - mysql_slow_log
+    - mysql_tablespace
+    - mysql_tablespace_info
     - mysql_tls
     - mysql_user
     - mysql_variables

@@ -1,0 +1,1074 @@
+---
+- name: Tablespace | Run MySQL lifecycle checks
+  vars:
+    mysql_parameters: &mysql_params
+      login_user: '{{ mysql_user }}'
+      login_password: '{{ mysql_password }}'
+      login_host: '{{ mysql_host }}'
+      login_port: '{{ mysql_primary_port }}'
+    preview_tablespace_name: ansible_tablespace_preview
+    no_datafile_tablespace_name: ansible_tablespace_nodata
+    tablespace_name: ansible_tablespace_main
+    renamed_tablespace_name: ansible_tablespace_archive
+    missing_tablespace_name: ansible_tablespace_missing
+    tablespace_schema: ansible_tablespace_db
+    tablespace_table: orders
+    preview_datafile: ./ansible_tablespace_preview.ibd
+    tablespace_datafile: ./ansible_tablespace_main.ibd
+    create_autoextend_size: 4194304
+    alter_autoextend_size: 8388608
+    create_file_block_size: 8192
+    preview_file_block_size: 8192
+    preview_encryption: Y
+    create_encryption: N
+  block:
+    - name: Tablespace | Set MySQL feature facts
+      ansible.builtin.set_fact:
+        mysql_supports_rename: "{{ db_version is version('8.0.3', '>=') }}"
+        mysql_supports_encryption: "{{ db_version is version('8.0.13', '>=') }}"
+        mysql_supports_optional_datafile: "{{ db_version is version('8.0.14', '>=') }}"
+        mysql_supports_autoextend_size: "{{ db_version is version('8.0.23', '>=') }}"
+        mysql_metadata_tablespaces: >-
+          {{
+            'INFORMATION_SCHEMA.INNODB_TABLESPACES'
+            if db_version is version('8.0.0', '>=')
+            else 'INFORMATION_SCHEMA.INNODB_SYS_TABLESPACES'
+          }}
+        mysql_metadata_datafiles: >-
+          {{
+            'INFORMATION_SCHEMA.INNODB_DATAFILES'
+            if db_version is version('8.0.0', '>=')
+            else 'INFORMATION_SCHEMA.INNODB_SYS_DATAFILES'
+          }}
+        mysql_metadata_tables: >-
+          {{
+            'INFORMATION_SCHEMA.INNODB_TABLES'
+            if db_version is version('8.0.0', '>=')
+            else 'INFORMATION_SCHEMA.INNODB_SYS_TABLES'
+          }}
+        active_tablespace_name: '{{ tablespace_name }}'
+
+    - name: Tablespace | Remove test database if present
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query: "DROP DATABASE IF EXISTS {{ tablespace_schema }}"
+
+    - name: Tablespace | Ensure primary tablespace is absent before tests
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ tablespace_name }}'
+        state: absent
+
+    - name: Tablespace | Ensure renamed tablespace is absent before tests
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ renamed_tablespace_name }}'
+        state: absent
+
+    - name: Tablespace | Ensure no-datafile tablespace is absent before tests
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ no_datafile_tablespace_name }}'
+        state: absent
+
+    - name: Tablespace | Preview unsupported autoextend create on older MySQL
+      check_mode: true
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ preview_tablespace_name }}'
+        datafile: '{{ preview_datafile }}'
+        file_block_size: '{{ preview_file_block_size }}'
+        autoextend_size: '{{ create_autoextend_size }}'
+      register: preview_unsupported_autoextend_result
+      ignore_errors: true
+      when: not mysql_supports_autoextend_size
+
+    - name: Tablespace | Assert unsupported autoextend create on older MySQL
+      ansible.builtin.assert:
+        that:
+          - preview_unsupported_autoextend_result is failed
+          - preview_unsupported_autoextend_result.msg == 'autoextend_size requires MySQL 8.0.23 or later'
+      when: not mysql_supports_autoextend_size
+
+    - name: Tablespace | Preview unsupported encryption create on older MySQL
+      check_mode: true
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ preview_tablespace_name }}'
+        datafile: '{{ preview_datafile }}'
+        file_block_size: '{{ preview_file_block_size }}'
+        encryption: '{{ preview_encryption }}'
+      register: preview_unsupported_encryption_result
+      ignore_errors: true
+      when: not mysql_supports_encryption
+
+    - name: Tablespace | Assert unsupported encryption create on older MySQL
+      ansible.builtin.assert:
+        that:
+          - preview_unsupported_encryption_result is failed
+          - preview_unsupported_encryption_result.msg == 'encryption requires MySQL 8.0.13 or later'
+      when: not mysql_supports_encryption
+
+    - name: Tablespace | Preview create with supported inputs
+      check_mode: true
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ preview_tablespace_name }}'
+        datafile: '{{ preview_datafile }}'
+        file_block_size: '{{ preview_file_block_size }}'
+        encryption: "{{ preview_encryption if mysql_supports_encryption else omit }}"
+        autoextend_size: "{{ create_autoextend_size if mysql_supports_autoextend_size else omit }}"
+      register: preview_create_result
+
+    - name: Tablespace | Assert create check mode result
+      ansible.builtin.assert:
+        that:
+          - preview_create_result is changed
+          - preview_create_result.queries | length == 1
+          - "'CREATE TABLESPACE `' ~ preview_tablespace_name ~ '`' in preview_create_result.queries[0]"
+          - preview_create_result.queries[0] | regex_search("ADD DATAFILE '.*ansible_tablespace_preview\\.ibd'") is not none
+          - "'FILE_BLOCK_SIZE = ' ~ (preview_file_block_size | string) in preview_create_result.queries[0]"
+          - >-
+            (
+              mysql_supports_autoextend_size and
+              ('AUTOEXTEND_SIZE = ' ~ (create_autoextend_size | string)) in preview_create_result.queries[0]
+            )
+            or
+            (
+              not mysql_supports_autoextend_size and
+              'AUTOEXTEND_SIZE = ' not in preview_create_result.queries[0]
+            )
+          - >-
+            (
+              mysql_supports_encryption and
+              "ENCRYPTION = 'Y'" in preview_create_result.queries[0]
+            )
+            or
+            (
+              not mysql_supports_encryption and
+              'ENCRYPTION = ' not in preview_create_result.queries[0]
+            )
+          - preview_create_result.tablespace.server_implementation == 'mysql'
+          - preview_create_result.tablespace.name == preview_tablespace_name
+          - preview_create_result.tablespace.datafile == preview_datafile
+          - >-
+            (
+              mysql_supports_autoextend_size and
+              preview_create_result.tablespace.autoextend_size == create_autoextend_size
+            )
+            or
+            (
+              not mysql_supports_autoextend_size and
+              'autoextend_size' not in preview_create_result.tablespace
+            )
+          - >-
+            (
+              mysql_supports_encryption and
+              preview_create_result.tablespace.encryption == preview_encryption
+            )
+            or
+            (
+              not mysql_supports_encryption and
+              'encryption' not in preview_create_result.tablespace
+            )
+
+    - name: Tablespace | Verify preview tablespace is absent after check mode
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query: >-
+          SELECT TABLESPACE_NAME
+          FROM INFORMATION_SCHEMA.FILES
+          WHERE FILE_TYPE = 'TABLESPACE' AND TABLESPACE_NAME = '{{ preview_tablespace_name }}'
+      register: preview_tablespace_state
+
+    - name: Tablespace | Assert preview tablespace is absent after check mode
+      ansible.builtin.assert:
+        that:
+          - preview_tablespace_state.query_result[0] | length == 0
+
+    - name: Tablespace | Gather missing MySQL tablespace info
+      ansible.mysql.mysql_tablespace_info:
+        <<: *mysql_params
+        name: '{{ missing_tablespace_name }}'
+      register: missing_tablespace_info
+
+    - name: Tablespace | Assert missing MySQL tablespace info
+      ansible.builtin.assert:
+        that:
+          - missing_tablespace_info is not changed
+          - missing_tablespace_info.tablespaces | length == 0
+
+    - name: Tablespace | Create tablespace without datafile on supported MySQL
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ no_datafile_tablespace_name }}'
+      register: no_datafile_create_result
+      when: mysql_supports_optional_datafile
+
+    - name: Tablespace | Assert no-datafile create result
+      ansible.builtin.assert:
+        that:
+          - no_datafile_create_result is changed
+          - no_datafile_create_result.queries | length == 1
+          - "'CREATE TABLESPACE `' ~ no_datafile_tablespace_name ~ '`' in no_datafile_create_result.queries[0]"
+          - "'ADD DATAFILE' not in no_datafile_create_result.queries[0]"
+          - no_datafile_create_result.tablespace.server_implementation == 'mysql'
+          - no_datafile_create_result.tablespace.name == no_datafile_tablespace_name
+      when: mysql_supports_optional_datafile
+
+    - name: Tablespace | Verify no-datafile tablespace metadata
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query: >-
+          SELECT f.TABLESPACE_NAME, COALESCE(df.PATH, f.FILE_NAME) AS FILE_NAME
+          FROM INFORMATION_SCHEMA.FILES AS f
+          LEFT JOIN {{ mysql_metadata_tablespaces }} AS ts ON ts.SPACE = f.FILE_ID
+          LEFT JOIN {{ mysql_metadata_datafiles }} AS df ON df.SPACE = ts.SPACE
+          WHERE f.FILE_TYPE = 'TABLESPACE' AND f.TABLESPACE_NAME = '{{ no_datafile_tablespace_name }}'
+      register: no_datafile_tablespace_state
+      when: mysql_supports_optional_datafile
+
+    - name: Tablespace | Assert no-datafile tablespace metadata
+      ansible.builtin.assert:
+        that:
+          - no_datafile_tablespace_state.query_result[0] | length == 1
+          - no_datafile_tablespace_state.query_result[0][0].TABLESPACE_NAME == no_datafile_tablespace_name
+          - no_datafile_tablespace_state.query_result[0][0].FILE_NAME is not none
+          - no_datafile_tablespace_state.query_result[0][0].FILE_NAME | length > 0
+      when: mysql_supports_optional_datafile
+
+    - name: Tablespace | Re-run no-datafile definition for idempotency
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ no_datafile_tablespace_name }}'
+      register: no_datafile_idempotency_result
+      when: mysql_supports_optional_datafile
+
+    - name: Tablespace | Assert no-datafile idempotency
+      ansible.builtin.assert:
+        that:
+          - no_datafile_idempotency_result is not changed
+          - no_datafile_idempotency_result.tablespace.name == no_datafile_tablespace_name
+      when: mysql_supports_optional_datafile
+
+    - name: Tablespace | Drop no-datafile tablespace after coverage
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ no_datafile_tablespace_name }}'
+        state: absent
+      when: mysql_supports_optional_datafile
+
+    - name: Tablespace | Create tablespace
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        encryption: "{{ create_encryption if mysql_supports_encryption else omit }}"
+        autoextend_size: "{{ create_autoextend_size if mysql_supports_autoextend_size else omit }}"
+      register: create_result
+
+    - name: Tablespace | Assert create result
+      ansible.builtin.assert:
+        that:
+          - create_result is changed
+          - create_result.queries | length == 1
+          - "'CREATE TABLESPACE `' ~ tablespace_name ~ '`' in create_result.queries[0]"
+          - create_result.queries[0] | regex_search("ADD DATAFILE '.*ansible_tablespace_main\\.ibd'") is not none
+          - "'FILE_BLOCK_SIZE = ' ~ (create_file_block_size | string) in create_result.queries[0]"
+          - >-
+            (
+              mysql_supports_autoextend_size and
+              ('AUTOEXTEND_SIZE = ' ~ (create_autoextend_size | string)) in create_result.queries[0]
+            )
+            or
+            (
+              not mysql_supports_autoextend_size and
+              'AUTOEXTEND_SIZE = ' not in create_result.queries[0]
+            )
+          - >-
+            (
+              mysql_supports_encryption and
+              "ENCRYPTION = 'N'" in create_result.queries[0]
+            )
+            or
+            (
+              not mysql_supports_encryption and
+              'ENCRYPTION = ' not in create_result.queries[0]
+            )
+          - create_result.tablespace.server_implementation == 'mysql'
+          - create_result.tablespace.name == tablespace_name
+          - create_result.tablespace.datafile | regex_search('ansible_tablespace_main\\.ibd$') is not none
+          - create_result.tablespace.zip_page_size == create_file_block_size
+          - >-
+            not mysql_supports_autoextend_size
+            or create_result.tablespace.autoextend_size == create_autoextend_size
+          - >-
+            (
+              mysql_supports_encryption and
+              create_result.tablespace.encryption == create_encryption
+            )
+            or
+            (
+              not mysql_supports_encryption and
+              create_result.tablespace.encryption is none
+            )
+
+    - name: Tablespace | Verify created tablespace metadata
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query: >-
+          SELECT f.TABLESPACE_NAME, COALESCE(df.PATH, f.FILE_NAME) AS FILE_NAME,
+          f.AUTOEXTEND_SIZE,
+          {% if db_version is version('8.0.0', '>=') %}ts.ENCRYPTION,{% else %}NULL AS ENCRYPTION,{% endif %}
+          ts.PAGE_SIZE, ts.ZIP_PAGE_SIZE
+          FROM INFORMATION_SCHEMA.FILES AS f
+          LEFT JOIN {{ mysql_metadata_tablespaces }} AS ts ON ts.SPACE = f.FILE_ID
+          LEFT JOIN {{ mysql_metadata_datafiles }} AS df ON df.SPACE = ts.SPACE
+          WHERE f.FILE_TYPE = 'TABLESPACE' AND f.TABLESPACE_NAME = '{{ tablespace_name }}'
+      register: created_tablespace_state
+
+    - name: Tablespace | Assert created tablespace metadata
+      ansible.builtin.assert:
+        that:
+          - created_tablespace_state.query_result[0] | length == 1
+          - created_tablespace_state.query_result[0][0].TABLESPACE_NAME == tablespace_name
+          - created_tablespace_state.query_result[0][0].FILE_NAME | regex_search('ansible_tablespace_main\\.ibd$') is not none
+          - created_tablespace_state.query_result[0][0].PAGE_SIZE | int >= create_file_block_size
+          - created_tablespace_state.query_result[0][0].ZIP_PAGE_SIZE | int == create_file_block_size
+          - >-
+            not mysql_supports_autoextend_size
+            or created_tablespace_state.query_result[0][0].AUTOEXTEND_SIZE | int == create_autoextend_size
+          - >-
+            (
+              mysql_supports_encryption and
+              created_tablespace_state.query_result[0][0].ENCRYPTION == create_encryption
+            )
+            or
+            (
+              not mysql_supports_encryption and
+              created_tablespace_state.query_result[0][0].ENCRYPTION is none
+            )
+
+    - name: Tablespace | Gather all MySQL tablespaces
+      ansible.mysql.mysql_tablespace_info:
+        <<: *mysql_params
+      register: all_tablespaces_info
+
+    - name: Tablespace | Assert all MySQL tablespaces result
+      ansible.builtin.assert:
+        that:
+          - all_tablespaces_info is not changed
+          - (all_tablespaces_info.tablespaces | selectattr('name', 'equalto', tablespace_name) | list | length) == 1
+
+    - name: Tablespace | Capture created tablespace info row
+      ansible.builtin.set_fact:
+        created_tablespace_info: >-
+          {{
+            (all_tablespaces_info.tablespaces
+            | selectattr('name', 'equalto', tablespace_name)
+            | list
+            | first)
+          }}
+
+    - name: Tablespace | Assert normalized MySQL tablespace info
+      ansible.builtin.assert:
+        that:
+          - created_tablespace_info.name == tablespace_name
+          - created_tablespace_info.datafile | regex_search('ansible_tablespace_main\\.ibd$') is not none
+          - created_tablespace_info.zip_page_size == create_file_block_size
+          - >-
+            not mysql_supports_autoextend_size
+            or created_tablespace_info.autoextend_size == create_autoextend_size
+          - >-
+            (
+              mysql_supports_encryption and
+              created_tablespace_info.encryption == create_encryption
+            )
+            or
+            (
+              not mysql_supports_encryption and
+              'encryption' not in created_tablespace_info
+            )
+          - created_tablespace_info.attached_tables == []
+
+    - name: Tablespace | Gather one MySQL tablespace
+      ansible.mysql.mysql_tablespace_info:
+        <<: *mysql_params
+        name: '{{ tablespace_name }}'
+      register: single_tablespace_info
+
+    - name: Tablespace | Assert single MySQL tablespace result
+      ansible.builtin.assert:
+        that:
+          - single_tablespace_info is not changed
+          - single_tablespace_info.tablespaces | length == 1
+          - single_tablespace_info.tablespaces[0].name == tablespace_name
+          - single_tablespace_info.tablespaces[0].datafile | regex_search('ansible_tablespace_main\\.ibd$') is not none
+          - single_tablespace_info.tablespaces[0].zip_page_size == create_file_block_size
+          - >-
+            not mysql_supports_autoextend_size
+            or single_tablespace_info.tablespaces[0].autoextend_size == create_autoextend_size
+          - >-
+            (
+              mysql_supports_encryption and
+              single_tablespace_info.tablespaces[0].encryption == create_encryption
+            )
+            or
+            (
+              not mysql_supports_encryption and
+              'encryption' not in single_tablespace_info.tablespaces[0]
+            )
+
+    - name: Tablespace | Re-run create definition for idempotency
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        encryption: "{{ create_encryption if mysql_supports_encryption else omit }}"
+        autoextend_size: "{{ create_autoextend_size if mysql_supports_autoextend_size else omit }}"
+      register: create_idempotency_result
+
+    - name: Tablespace | Assert create idempotency
+      ansible.builtin.assert:
+        that:
+          - create_idempotency_result is not changed
+          - create_idempotency_result.tablespace.name == tablespace_name
+          - create_idempotency_result.tablespace.datafile | regex_search('ansible_tablespace_main\\.ibd$') is not none
+          - create_idempotency_result.tablespace.zip_page_size == create_file_block_size
+          - >-
+            not mysql_supports_autoextend_size
+            or create_idempotency_result.tablespace.autoextend_size == create_autoextend_size
+          - >-
+            (
+              mysql_supports_encryption and
+              create_idempotency_result.tablespace.encryption == create_encryption
+            )
+            or
+            (
+              not mysql_supports_encryption and
+              create_idempotency_result.tablespace.encryption is none
+            )
+
+    - name: Tablespace | Preview rename
+      check_mode: true
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        rename_to: '{{ renamed_tablespace_name }}'
+      register: rename_preview_result
+      when: mysql_supports_rename
+
+    - name: Tablespace | Assert rename check mode result
+      ansible.builtin.assert:
+        that:
+          - rename_preview_result is changed
+          - rename_preview_result.queries == ["ALTER TABLESPACE `{{ tablespace_name }}` RENAME TO `{{ renamed_tablespace_name }}`"]
+          - rename_preview_result.tablespace.name == renamed_tablespace_name
+      when: mysql_supports_rename
+
+    - name: Tablespace | Verify rename check mode kept current state
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query:
+          - >-
+            SELECT TABLESPACE_NAME
+            FROM INFORMATION_SCHEMA.FILES
+            WHERE FILE_TYPE = 'TABLESPACE' AND TABLESPACE_NAME = '{{ tablespace_name }}'
+          - >-
+            SELECT TABLESPACE_NAME
+            FROM INFORMATION_SCHEMA.FILES
+            WHERE FILE_TYPE = 'TABLESPACE' AND TABLESPACE_NAME = '{{ renamed_tablespace_name }}'
+      register: rename_preview_state
+      when: mysql_supports_rename
+
+    - name: Tablespace | Assert rename check mode kept current state
+      ansible.builtin.assert:
+        that:
+          - rename_preview_state.query_result[0] | length == 1
+          - rename_preview_state.query_result[1] | length == 0
+      when: mysql_supports_rename
+
+    - name: Tablespace | Rename tablespace
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        rename_to: '{{ renamed_tablespace_name }}'
+      register: rename_result
+      when: mysql_supports_rename
+
+    - name: Tablespace | Assert rename result
+      ansible.builtin.assert:
+        that:
+          - rename_result is changed
+          - rename_result.queries == ["ALTER TABLESPACE `{{ tablespace_name }}` RENAME TO `{{ renamed_tablespace_name }}`"]
+          - rename_result.tablespace.name == renamed_tablespace_name
+          - rename_result.tablespace.datafile | regex_search('ansible_tablespace_main\\.ibd$') is not none
+          - rename_result.tablespace.zip_page_size == create_file_block_size
+      when: mysql_supports_rename
+
+    - name: Tablespace | Set renamed tablespace fact
+      ansible.builtin.set_fact:
+        active_tablespace_name: '{{ renamed_tablespace_name }}'
+      when: mysql_supports_rename
+
+    - name: Tablespace | Verify renamed tablespace metadata
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query:
+          - >-
+            SELECT TABLESPACE_NAME
+            FROM INFORMATION_SCHEMA.FILES
+            WHERE FILE_TYPE = 'TABLESPACE' AND TABLESPACE_NAME = '{{ tablespace_name }}'
+          - >-
+            SELECT f.TABLESPACE_NAME, COALESCE(df.PATH, f.FILE_NAME) AS FILE_NAME,
+            f.AUTOEXTEND_SIZE,
+            {% if db_version is version('8.0.0', '>=') %}ts.ENCRYPTION,{% else %}NULL AS ENCRYPTION,{% endif %}
+            ts.PAGE_SIZE, ts.ZIP_PAGE_SIZE
+            FROM INFORMATION_SCHEMA.FILES AS f
+            LEFT JOIN {{ mysql_metadata_tablespaces }} AS ts ON ts.SPACE = f.FILE_ID
+            LEFT JOIN {{ mysql_metadata_datafiles }} AS df ON df.SPACE = ts.SPACE
+            WHERE f.FILE_TYPE = 'TABLESPACE' AND f.TABLESPACE_NAME = '{{ renamed_tablespace_name }}'
+      register: renamed_tablespace_state
+      when: mysql_supports_rename
+
+    - name: Tablespace | Assert renamed tablespace metadata
+      ansible.builtin.assert:
+        that:
+          - renamed_tablespace_state.query_result[0] | length == 0
+          - renamed_tablespace_state.query_result[1] | length == 1
+          - renamed_tablespace_state.query_result[1][0].TABLESPACE_NAME == renamed_tablespace_name
+          - renamed_tablespace_state.query_result[1][0].FILE_NAME | regex_search('ansible_tablespace_main\\.ibd$') is not none
+          - renamed_tablespace_state.query_result[1][0].PAGE_SIZE | int >= create_file_block_size
+          - renamed_tablespace_state.query_result[1][0].ZIP_PAGE_SIZE | int == create_file_block_size
+          - >-
+            (
+              mysql_supports_encryption and
+              renamed_tablespace_state.query_result[1][0].ENCRYPTION == create_encryption
+            )
+            or
+            (
+              not mysql_supports_encryption and
+              renamed_tablespace_state.query_result[1][0].ENCRYPTION is none
+            )
+      when: mysql_supports_rename
+
+    - name: Tablespace | Re-run renamed definition for idempotency
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        rename_to: '{{ renamed_tablespace_name }}'
+      register: rename_idempotency_result
+      when: mysql_supports_rename
+
+    - name: Tablespace | Assert rename idempotency
+      ansible.builtin.assert:
+        that:
+          - rename_idempotency_result is not changed
+          - rename_idempotency_result.tablespace.name == renamed_tablespace_name
+      when: mysql_supports_rename
+
+    - name: Tablespace | Assert rename unsupported on older MySQL
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        rename_to: '{{ renamed_tablespace_name }}'
+      register: rename_unsupported_result
+      ignore_errors: true
+      when: not mysql_supports_rename
+
+    - name: Tablespace | Assert rename unsupported failure message
+      ansible.builtin.assert:
+        that:
+          - rename_unsupported_result is failed
+          - rename_unsupported_result.msg == 'rename requires MySQL 8.0.3 or later'
+      when: not mysql_supports_rename
+
+    - name: Tablespace | Preview autoextend_size alter
+      check_mode: true
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ active_tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        autoextend_size: '{{ alter_autoextend_size }}'
+      register: autoextend_preview_result
+      when: mysql_supports_autoextend_size
+
+    - name: Tablespace | Assert autoextend_size alter check mode result
+      ansible.builtin.assert:
+        that:
+          - autoextend_preview_result is changed
+          - autoextend_preview_result.queries == ['ALTER TABLESPACE `' ~ active_tablespace_name ~ '` AUTOEXTEND_SIZE = ' ~ (alter_autoextend_size | string)]
+          - autoextend_preview_result.tablespace.name == active_tablespace_name
+          - autoextend_preview_result.tablespace.autoextend_size == alter_autoextend_size
+      when: mysql_supports_autoextend_size
+
+    - name: Tablespace | Verify autoextend check mode kept current state
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query: >-
+          SELECT f.TABLESPACE_NAME, COALESCE(df.PATH, f.FILE_NAME) AS FILE_NAME,
+          f.AUTOEXTEND_SIZE,
+          {% if db_version is version('8.0.0', '>=') %}ts.ENCRYPTION,{% else %}NULL AS ENCRYPTION,{% endif %}
+          ts.PAGE_SIZE, ts.ZIP_PAGE_SIZE
+          FROM INFORMATION_SCHEMA.FILES AS f
+          LEFT JOIN {{ mysql_metadata_tablespaces }} AS ts ON ts.SPACE = f.FILE_ID
+          LEFT JOIN {{ mysql_metadata_datafiles }} AS df ON df.SPACE = ts.SPACE
+          WHERE f.FILE_TYPE = 'TABLESPACE' AND f.TABLESPACE_NAME = '{{ active_tablespace_name }}'
+      register: autoextend_preview_state
+      when: mysql_supports_autoextend_size
+
+    - name: Tablespace | Assert autoextend check mode kept current state
+      ansible.builtin.assert:
+        that:
+          - autoextend_preview_state.query_result[0] | length == 1
+          - autoextend_preview_state.query_result[0][0].AUTOEXTEND_SIZE | int == create_autoextend_size
+      when: mysql_supports_autoextend_size
+
+    - name: Tablespace | Alter autoextend_size
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ active_tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        autoextend_size: '{{ alter_autoextend_size }}'
+      register: autoextend_result
+      when: mysql_supports_autoextend_size
+
+    - name: Tablespace | Assert autoextend_size alter result
+      ansible.builtin.assert:
+        that:
+          - autoextend_result is changed
+          - autoextend_result.queries == ['ALTER TABLESPACE `' ~ active_tablespace_name ~ '` AUTOEXTEND_SIZE = ' ~ (alter_autoextend_size | string)]
+          - autoextend_result.tablespace.name == active_tablespace_name
+          - autoextend_result.tablespace.autoextend_size == alter_autoextend_size
+      when: mysql_supports_autoextend_size
+
+    - name: Tablespace | Verify autoextend_size metadata
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query: >-
+          SELECT f.TABLESPACE_NAME, COALESCE(df.PATH, f.FILE_NAME) AS FILE_NAME,
+          f.AUTOEXTEND_SIZE,
+          {% if db_version is version('8.0.0', '>=') %}ts.ENCRYPTION,{% else %}NULL AS ENCRYPTION,{% endif %}
+          ts.PAGE_SIZE, ts.ZIP_PAGE_SIZE
+          FROM INFORMATION_SCHEMA.FILES AS f
+          LEFT JOIN {{ mysql_metadata_tablespaces }} AS ts ON ts.SPACE = f.FILE_ID
+          LEFT JOIN {{ mysql_metadata_datafiles }} AS df ON df.SPACE = ts.SPACE
+          WHERE f.FILE_TYPE = 'TABLESPACE' AND f.TABLESPACE_NAME = '{{ active_tablespace_name }}'
+      register: autoextend_state
+      when: mysql_supports_autoextend_size
+
+    - name: Tablespace | Assert autoextend_size metadata
+      ansible.builtin.assert:
+        that:
+          - autoextend_state.query_result[0] | length == 1
+          - autoextend_state.query_result[0][0].AUTOEXTEND_SIZE | int == alter_autoextend_size
+      when: mysql_supports_autoextend_size
+
+    - name: Tablespace | Re-run autoextend_size definition for idempotency
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ active_tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        autoextend_size: '{{ alter_autoextend_size }}'
+      register: autoextend_idempotency_result
+      when: mysql_supports_autoextend_size
+
+    - name: Tablespace | Assert autoextend_size idempotency
+      ansible.builtin.assert:
+        that:
+          - autoextend_idempotency_result is not changed
+          - autoextend_idempotency_result.tablespace.autoextend_size == alter_autoextend_size
+      when: mysql_supports_autoextend_size
+
+    - name: Tablespace | Assert autoextend_size unsupported on older MySQL
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ active_tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        autoextend_size: '{{ alter_autoextend_size }}'
+      register: autoextend_unsupported_result
+      ignore_errors: true
+      when: not mysql_supports_autoextend_size
+
+    - name: Tablespace | Assert autoextend_size unsupported failure message
+      ansible.builtin.assert:
+        that:
+          - autoextend_unsupported_result is failed
+          - autoextend_unsupported_result.msg == 'autoextend_size requires MySQL 8.0.23 or later'
+      when: not mysql_supports_autoextend_size
+
+    - name: Tablespace | Detect keyring plugin and component table
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query:
+          - >-
+            SELECT COUNT(*) AS plugin_count
+            FROM INFORMATION_SCHEMA.PLUGINS
+            WHERE PLUGIN_STATUS = 'ACTIVE' AND PLUGIN_NAME LIKE 'keyring%'
+          - >-
+            SELECT COUNT(*) AS component_table_count
+            FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_SCHEMA = 'mysql' AND TABLE_NAME = 'component'
+      register: keyring_detection_state
+      when: mysql_supports_encryption
+
+    - name: Tablespace | Detect keyring component
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query: >-
+          SELECT COUNT(*) AS component_count
+          FROM mysql.component
+          WHERE component_urn LIKE 'file://component_keyring%'
+          OR component_urn LIKE 'file://component_keyring_%'
+      register: keyring_component_state
+      when:
+        - mysql_supports_encryption
+        - keyring_detection_state.query_result[1][0].component_table_count | int == 1
+
+    - name: Tablespace | Set keyring availability facts
+      ansible.builtin.set_fact:
+        mysql_keyring_available: >-
+          {{
+            (keyring_detection_state.query_result[0][0].plugin_count | int) > 0 or
+            ((keyring_component_state.query_result[0][0].component_count | int) if keyring_component_state is defined else 0) > 0
+          }}
+      when: mysql_supports_encryption
+
+    - name: Tablespace | Preview encryption alter
+      check_mode: true
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ active_tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        encryption: Y
+      register: encryption_preview_result
+      when: mysql_supports_encryption
+
+    - name: Tablespace | Assert encryption alter check mode result
+      ansible.builtin.assert:
+        that:
+          - encryption_preview_result is changed
+          - encryption_preview_result.queries == ["ALTER TABLESPACE `{{ active_tablespace_name }}` ENCRYPTION = 'Y'"]
+          - encryption_preview_result.tablespace.name == active_tablespace_name
+          - encryption_preview_result.tablespace.encryption == 'Y'
+      when: mysql_supports_encryption
+
+    - name: Tablespace | Enable encryption live when keyring is available
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ active_tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        encryption: Y
+      register: enable_encryption_result
+      when:
+        - mysql_supports_encryption
+        - mysql_keyring_available
+
+    - name: Tablespace | Assert live encryption enable result
+      ansible.builtin.assert:
+        that:
+          - enable_encryption_result is changed
+          - enable_encryption_result.queries == ["ALTER TABLESPACE `{{ active_tablespace_name }}` ENCRYPTION = 'Y'"]
+          - enable_encryption_result.tablespace.encryption == 'Y'
+      when:
+        - mysql_supports_encryption
+        - mysql_keyring_available
+
+    - name: Tablespace | Verify live encryption enable metadata
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query: >-
+          SELECT f.TABLESPACE_NAME, COALESCE(df.PATH, f.FILE_NAME) AS FILE_NAME,
+          f.AUTOEXTEND_SIZE, ts.ENCRYPTION, ts.PAGE_SIZE, ts.ZIP_PAGE_SIZE
+          FROM INFORMATION_SCHEMA.FILES AS f
+          LEFT JOIN {{ mysql_metadata_tablespaces }} AS ts ON ts.SPACE = f.FILE_ID
+          LEFT JOIN {{ mysql_metadata_datafiles }} AS df ON df.SPACE = ts.SPACE
+          WHERE f.FILE_TYPE = 'TABLESPACE' AND f.TABLESPACE_NAME = '{{ active_tablespace_name }}'
+      register: enabled_encryption_state
+      when:
+        - mysql_supports_encryption
+        - mysql_keyring_available
+
+    - name: Tablespace | Assert live encryption enable metadata
+      ansible.builtin.assert:
+        that:
+          - enabled_encryption_state.query_result[0] | length == 1
+          - enabled_encryption_state.query_result[0][0].ENCRYPTION == 'Y'
+      when:
+        - mysql_supports_encryption
+        - mysql_keyring_available
+
+    - name: Tablespace | Gather encrypted tablespace info
+      ansible.mysql.mysql_tablespace_info:
+        <<: *mysql_params
+        name: '{{ active_tablespace_name }}'
+      register: encrypted_tablespace_info
+      when:
+        - mysql_supports_encryption
+        - mysql_keyring_available
+
+    - name: Tablespace | Assert encrypted tablespace info
+      ansible.builtin.assert:
+        that:
+          - encrypted_tablespace_info is not changed
+          - encrypted_tablespace_info.tablespaces | length == 1
+          - encrypted_tablespace_info.tablespaces[0].encryption == 'Y'
+      when:
+        - mysql_supports_encryption
+        - mysql_keyring_available
+
+    - name: Tablespace | Disable encryption live when keyring is available
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ active_tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        encryption: '{{ create_encryption }}'
+      register: disable_encryption_result
+      when:
+        - mysql_supports_encryption
+        - mysql_keyring_available
+
+    - name: Tablespace | Assert live encryption disable result
+      ansible.builtin.assert:
+        that:
+          - disable_encryption_result is changed
+          - disable_encryption_result.queries == ["ALTER TABLESPACE `{{ active_tablespace_name }}` ENCRYPTION = 'N'"]
+          - disable_encryption_result.tablespace.encryption == create_encryption
+      when:
+        - mysql_supports_encryption
+        - mysql_keyring_available
+
+    - name: Tablespace | Verify live encryption disable metadata
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query: >-
+          SELECT f.TABLESPACE_NAME, COALESCE(df.PATH, f.FILE_NAME) AS FILE_NAME,
+          f.AUTOEXTEND_SIZE, ts.ENCRYPTION, ts.PAGE_SIZE, ts.ZIP_PAGE_SIZE
+          FROM INFORMATION_SCHEMA.FILES AS f
+          LEFT JOIN {{ mysql_metadata_tablespaces }} AS ts ON ts.SPACE = f.FILE_ID
+          LEFT JOIN {{ mysql_metadata_datafiles }} AS df ON df.SPACE = ts.SPACE
+          WHERE f.FILE_TYPE = 'TABLESPACE' AND f.TABLESPACE_NAME = '{{ active_tablespace_name }}'
+      register: disabled_encryption_state
+      when:
+        - mysql_supports_encryption
+        - mysql_keyring_available
+
+    - name: Tablespace | Assert live encryption disable metadata
+      ansible.builtin.assert:
+        that:
+          - disabled_encryption_state.query_result[0] | length == 1
+          - disabled_encryption_state.query_result[0][0].ENCRYPTION == create_encryption
+      when:
+        - mysql_supports_encryption
+        - mysql_keyring_available
+
+    - name: Tablespace | Re-run disabled encryption definition for idempotency
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ active_tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        encryption: '{{ create_encryption }}'
+      register: encryption_idempotency_result
+      when:
+        - mysql_supports_encryption
+        - mysql_keyring_available
+
+    - name: Tablespace | Assert disabled encryption idempotency
+      ansible.builtin.assert:
+        that:
+          - encryption_idempotency_result is not changed
+          - encryption_idempotency_result.tablespace.encryption == create_encryption
+      when:
+        - mysql_supports_encryption
+        - mysql_keyring_available
+
+    - name: Tablespace | Intentionally skip live encryption change without keyring
+      ansible.builtin.assert:
+        that:
+          - mysql_supports_encryption
+          - not mysql_keyring_available
+      when:
+        - mysql_supports_encryption
+        - not mysql_keyring_available
+
+    - name: Tablespace | Assert encryption input remains idempotent without keyring
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ active_tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        encryption: '{{ create_encryption }}'
+      register: encryption_noop_result
+      when:
+        - mysql_supports_encryption
+        - not mysql_keyring_available
+
+    - name: Tablespace | Assert encryption noop result without keyring
+      ansible.builtin.assert:
+        that:
+          - encryption_noop_result is not changed
+          - encryption_noop_result.tablespace.encryption == create_encryption
+      when:
+        - mysql_supports_encryption
+        - not mysql_keyring_available
+
+    - name: Tablespace | Assert encryption alter unsupported on older MySQL
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ active_tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        encryption: Y
+      register: encryption_unsupported_result
+      ignore_errors: true
+      when: not mysql_supports_encryption
+
+    - name: Tablespace | Assert encryption unsupported failure message
+      ansible.builtin.assert:
+        that:
+          - encryption_unsupported_result is failed
+          - encryption_unsupported_result.msg == 'encryption requires MySQL 8.0.13 or later'
+      when: not mysql_supports_encryption
+
+    - name: Tablespace | Create database and attach table to active tablespace
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query:
+          - "CREATE DATABASE {{ tablespace_schema }}"
+          - >-
+            CREATE TABLE {{ tablespace_schema }}.{{ tablespace_table }} (
+            id INT PRIMARY KEY
+            ) ENGINE=InnoDB ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8
+            TABLESPACE {{ active_tablespace_name }}
+
+    - name: Tablespace | Gather active tablespace info after attachment
+      ansible.mysql.mysql_tablespace_info:
+        <<: *mysql_params
+        name: '{{ active_tablespace_name }}'
+      register: attached_tablespace_info
+
+    - name: Tablespace | Assert active tablespace info after attachment
+      ansible.builtin.assert:
+        that:
+          - attached_tablespace_info is not changed
+          - attached_tablespace_info.tablespaces | length == 1
+          - attached_tablespace_info.tablespaces[0].name == active_tablespace_name
+          - attached_tablespace_info.tablespaces[0].attached_tables == [tablespace_schema ~ '/' ~ tablespace_table]
+
+    - name: Tablespace | Verify attached tables metadata
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query: >-
+          SELECT GROUP_CONCAT(t.NAME ORDER BY t.NAME SEPARATOR ',') AS ATTACHED_TABLES
+          FROM INFORMATION_SCHEMA.FILES AS f
+          LEFT JOIN {{ mysql_metadata_tablespaces }} AS ts ON ts.SPACE = f.FILE_ID
+          LEFT JOIN {{ mysql_metadata_tables }} AS t ON t.SPACE = ts.SPACE
+          WHERE f.FILE_TYPE = 'TABLESPACE' AND f.TABLESPACE_NAME = '{{ active_tablespace_name }}'
+          GROUP BY f.TABLESPACE_NAME
+      register: attached_tables_state
+
+    - name: Tablespace | Assert attached tables metadata
+      ansible.builtin.assert:
+        that:
+          - attached_tables_state.query_result[0] | length == 1
+          - attached_tables_state.query_result[0][0].ATTACHED_TABLES == tablespace_schema ~ '/' ~ tablespace_table
+
+    - name: Tablespace | Preview drop
+      check_mode: true
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ active_tablespace_name }}'
+        state: absent
+      register: drop_preview_result
+
+    - name: Tablespace | Assert drop check mode result
+      ansible.builtin.assert:
+        that:
+          - drop_preview_result is changed
+          - drop_preview_result.queries == ['DROP TABLESPACE `' ~ active_tablespace_name ~ '`']
+
+    - name: Tablespace | Verify drop check mode left tablespace in place
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query: >-
+          SELECT f.TABLESPACE_NAME, COALESCE(df.PATH, f.FILE_NAME) AS FILE_NAME,
+          f.AUTOEXTEND_SIZE,
+          {% if db_version is version('8.0.0', '>=') %}ts.ENCRYPTION,{% else %}NULL AS ENCRYPTION,{% endif %}
+          ts.PAGE_SIZE, ts.ZIP_PAGE_SIZE
+          FROM INFORMATION_SCHEMA.FILES AS f
+          LEFT JOIN {{ mysql_metadata_tablespaces }} AS ts ON ts.SPACE = f.FILE_ID
+          LEFT JOIN {{ mysql_metadata_datafiles }} AS df ON df.SPACE = ts.SPACE
+          WHERE f.FILE_TYPE = 'TABLESPACE' AND f.TABLESPACE_NAME = '{{ active_tablespace_name }}'
+      register: drop_preview_state
+
+    - name: Tablespace | Assert drop check mode left tablespace in place
+      ansible.builtin.assert:
+        that:
+          - drop_preview_state.query_result[0] | length == 1
+
+    - name: Tablespace | Drop test database before removing tablespace
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query: "DROP DATABASE IF EXISTS {{ tablespace_schema }}"
+
+    - name: Tablespace | Drop tablespace
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ active_tablespace_name }}'
+        state: absent
+      register: drop_result
+
+    - name: Tablespace | Assert drop result
+      ansible.builtin.assert:
+        that:
+          - drop_result is changed
+          - drop_result.queries == ['DROP TABLESPACE `' ~ active_tablespace_name ~ '`']
+
+    - name: Tablespace | Verify tablespace is absent after drop
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query: >-
+          SELECT f.TABLESPACE_NAME, COALESCE(df.PATH, f.FILE_NAME) AS FILE_NAME,
+          f.AUTOEXTEND_SIZE,
+          {% if db_version is version('8.0.0', '>=') %}ts.ENCRYPTION,{% else %}NULL AS ENCRYPTION,{% endif %}
+          ts.PAGE_SIZE, ts.ZIP_PAGE_SIZE
+          FROM INFORMATION_SCHEMA.FILES AS f
+          LEFT JOIN {{ mysql_metadata_tablespaces }} AS ts ON ts.SPACE = f.FILE_ID
+          LEFT JOIN {{ mysql_metadata_datafiles }} AS df ON df.SPACE = ts.SPACE
+          WHERE f.FILE_TYPE = 'TABLESPACE' AND f.TABLESPACE_NAME = '{{ active_tablespace_name }}'
+      register: dropped_tablespace_state
+
+    - name: Tablespace | Assert tablespace is absent after drop
+      ansible.builtin.assert:
+        that:
+          - dropped_tablespace_state.query_result[0] | length == 0
+
+    - name: Tablespace | Re-run drop for idempotency
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ active_tablespace_name }}'
+        state: absent
+      register: drop_idempotency_result
+
+    - name: Tablespace | Assert drop idempotency
+      ansible.builtin.assert:
+        that:
+          - drop_idempotency_result is not changed
