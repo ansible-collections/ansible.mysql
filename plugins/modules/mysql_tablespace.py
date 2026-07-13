@@ -27,7 +27,6 @@ options:
       - Name of the tablespace to manage.
     type: str
     required: true
-    version_added: '5.2.0'
   state:
     description:
       - If V(present), create the tablespace when it does not exist.
@@ -36,7 +35,6 @@ options:
     type: str
     choices: [absent, present]
     default: present
-    version_added: '5.2.0'
   datafile:
     description:
       - Tablespace datafile path.
@@ -44,7 +42,6 @@ options:
       - Required on MySQL versions earlier than V(8.0.14).
       - Optional on MySQL V(8.0.14) and later.
     type: str
-    version_added: '5.2.0'
   file_block_size:
     description:
       - File block size for the general tablespace.
@@ -53,7 +50,6 @@ options:
       - Deeper semantic validation is left to MySQL because valid values depend on
         C(innodb_page_size) and compressed-page rules rather than a standalone whitelist.
     type: int
-    version_added: '5.2.0'
   encryption:
     description:
       - Whether the general tablespace should be encrypted.
@@ -63,22 +59,19 @@ options:
       - Does not rotate InnoDB master keys. Key rotation remains an instance-level
         operation exposed through C(ALTER INSTANCE ROTATE INNODB MASTER KEY).
     type: str
-    version_added: '5.2.0'
   rename_to:
     description:
       - Rename the tablespace to this new name.
       - Alter-only.
       - Supported on MySQL V(8.0.3) and later.
-      - Cannot be used with O(state=absent).
+      - Cannot be used when O(state) is V(absent).
     type: str
-    version_added: '5.2.0'
   autoextend_size:
     description:
       - Tablespace autoextend size in bytes.
       - Supported on MySQL V(8.0.23) and later.
       - Can be set during create or alter.
     type: int
-    version_added: '5.2.0'
 
 notes:
   - Compatible with MySQL only.

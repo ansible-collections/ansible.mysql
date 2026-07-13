@@ -31,7 +31,6 @@ options:
       - Limit the collected information to a single tablespace name.
       - This matches the general tablespace name.
     type: str
-    version_added: '5.2.0'
 
 notes:
   - Compatible with MySQL V(5.7.6) or later.
