@@ -43,14 +43,6 @@ jobs:
           - '1.1.1'
           - '1.2.0'
 
-        exclude:
-
-          - db_engine_version: '8.4.9'
-            connector_version: '2.0.1'
-
-          - db_engine_version: '8.4.9'
-            connector_version: '2.0.3'
-
     services:
       db_primary:
         image: docker.io/library/${{ matrix.db_engine_name }}:${{ matrix.db_engine_version }}
