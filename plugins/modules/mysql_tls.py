@@ -364,7 +364,7 @@ def main():
     tls = MySQLTLS(
         module,
         cursor,
-        get_server_implementation(cursor),
+        get_server_implementation(module, cursor),
         server_version=server_version,
     )
 

@@ -3,10 +3,22 @@
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
+from contextlib import contextmanager
+import json
+import sys
+
 import pytest
 
+from ansible.module_utils import basic
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.common.text.converters import to_bytes
+try:
+    from ansible.module_utils.testing import patch_module_args  # pyright: ignore[reportMissingImports]
+except ImportError:
+    patch_module_args = None
+
 from ansible_collections.ansible.mysql.plugins.modules import mysql_tls as mysql_tls_module
-from ansible_collections.ansible.mysql.plugins.modules.mysql_tls import MySQLTLS
+from ansible_collections.ansible.mysql.plugins.modules.mysql_tls import MySQLTLS, main
 
 
 # ---------------------------------------------------------------------------
@@ -73,8 +85,48 @@ class ModuleStub:
         raise RuntimeError(kwargs.get('msg', 'fail_json called'))
 
 
+class AnsibleExitJson(Exception):
+    pass
+
+
+def exit_json(*args, **kwargs):
+    raise AnsibleExitJson(kwargs)
+
+
 class DummyDriverError(Exception):
     pass
+
+
+@contextmanager
+def set_module_args(args):
+    module_args = dict(args)
+
+    original_argv = sys.argv[:]
+    sys.argv = ['ansible_unittest']
+
+    try:
+        if patch_module_args is not None:
+            with patch_module_args(module_args):
+                yield
+            return
+
+        original_args = getattr(basic, '_ANSIBLE_ARGS', None)
+        original_profile = getattr(basic, '_ANSIBLE_PROFILE', None)
+        had_profile = hasattr(basic, '_ANSIBLE_PROFILE')
+
+        basic._ANSIBLE_ARGS = to_bytes(json.dumps({'ANSIBLE_MODULE_ARGS': module_args}))
+        basic._ANSIBLE_PROFILE = 'legacy'
+
+        try:
+            yield
+        finally:
+            basic._ANSIBLE_ARGS = original_args
+            if had_profile:
+                basic._ANSIBLE_PROFILE = original_profile
+            else:
+                delattr(basic, '_ANSIBLE_PROFILE')
+    finally:
+        sys.argv = original_argv
 
 
 def _make_mysql_cursor(overrides=None, server_version='8.0.34', write_error=None, reload_error=None):
@@ -389,3 +441,38 @@ def test_configure_with_persist_mode_uses_set_persist():
     assert result['changed'] is True
     assert any('SET PERSIST' in q for q in result['queries'])
     assert not any('SET GLOBAL' in q for q in result['queries'])
+
+
+def test_main_passes_module_to_get_server_implementation(monkeypatch):
+    cursor = _make_mysql_cursor()
+    implementation_args = []
+
+    monkeypatch.setattr(AnsibleModule, 'exit_json', exit_json)
+    monkeypatch.setattr(
+        mysql_tls_module,
+        'mysql_driver',
+        object(),
+    )
+    monkeypatch.setattr(
+        mysql_tls_module,
+        'mysql_connect',
+        lambda *args, **kwargs: (cursor, object()),
+    )
+
+    def fake_get_server_implementation(module, db_cursor):
+        implementation_args.append((module, db_cursor))
+        return 'mysql'
+
+    monkeypatch.setattr(
+        mysql_tls_module,
+        'get_server_implementation',
+        fake_get_server_implementation,
+    )
+
+    with set_module_args({'login_unix_socket': '/run/mysqld/mysqld.sock'}):
+        with pytest.raises(AnsibleExitJson):
+            main()
+
+    assert len(implementation_args) == 1
+    assert isinstance(implementation_args[0][0], AnsibleModule)
+    assert implementation_args[0][1] is cursor
