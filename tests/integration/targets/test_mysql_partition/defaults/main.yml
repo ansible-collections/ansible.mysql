@@ -1,0 +1,6 @@
+---
+mysql_user: root
+mysql_password: msandbox
+mysql_host: '{{ gateway_addr }}'
+mysql_primary_port: 3307
+test_db: partition_test_db
