@@ -562,7 +562,7 @@ def main():
     except Exception as e:
         module.fail_json(msg='unable to connect to database: %s' % to_native(e))
 
-    if get_server_implementation(cursor) != 'mysql':
+    if get_server_implementation(module, cursor) != 'mysql':
         module.fail_json(msg='mysql_partition is supported only by MySQL. MariaDB is not supported.')
 
     if not schema:

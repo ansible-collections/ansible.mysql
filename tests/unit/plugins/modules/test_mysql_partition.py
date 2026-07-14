@@ -841,7 +841,7 @@ def _patch_main(monkeypatch, module, cursor, server_impl='mysql', partition_rows
     )
     monkeypatch.setattr(
         'ansible_collections.ansible.mysql.plugins.modules.mysql_partition.get_server_implementation',
-        lambda _cursor: server_impl,
+        lambda _module, _cursor: server_impl,
     )
     monkeypatch.setattr(
         'ansible_collections.ansible.mysql.plugins.modules.mysql_partition.check_input',
