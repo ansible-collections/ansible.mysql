@@ -39,7 +39,7 @@ def get_server_version_tuple(cursor):
 
 
 def ensure_tablespaces_supported(module, cursor):
-    if get_server_implementation(cursor) != 'mysql':
+    if get_server_implementation(module, cursor) != 'mysql':
         module.fail_json(msg='Tablespace operations are supported only by MySQL.')
 
     server_version = get_server_version_tuple(cursor)

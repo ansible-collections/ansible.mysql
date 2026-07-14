@@ -516,7 +516,7 @@ def test_main_fails_fast_for_unsupported_server(monkeypatch):
     )
     monkeypatch.setattr(
         'ansible_collections.ansible.mysql.plugins.module_utils.tablespace.get_server_implementation',
-        lambda _cursor: 'unsupported',
+        lambda _module, _cursor: 'unsupported',
     )
 
     with pytest.raises(RuntimeError) as exc:
