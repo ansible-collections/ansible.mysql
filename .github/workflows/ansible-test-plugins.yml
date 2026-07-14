@@ -33,12 +33,9 @@ jobs:
           - devel
         db_engine_name:
           - mysql
-          - mariadb
         db_engine_version:
           - '8.4.9'
           - '9.7.0'
-          - '10.11.8'
-          - '11.8.7'
         connector_name:
           - pymysql
         connector_version:
@@ -46,45 +43,7 @@ jobs:
           - '1.1.1'
           - '1.2.0'
 
-        include:
-
-          # RHEL8 context
-          - connector_name: pymysql
-            connector_version: '0.10.1'
-            ansible: stable-2.16
-            db_engine_name: mariadb
-            db_engine_version: '10.11.8'
-
-            # RHEL9 context
-            # - connector_name: pymysql
-            #   connector_version: '1.1.1'
-            #   ansible: stable-2.17
-            #   db_engine_name: mariadb
-            #   db_engine_version: '10.11.8'
-            # This tests is already included in the matrix, no need repeating
-
         exclude:
-
-          - db_engine_name: mysql
-            db_engine_version: '10.11.8'
-
-          - db_engine_name: mysql
-            db_engine_version: '11.8.7'
-
-          - db_engine_name: mariadb
-            db_engine_version: '8.4.9'
-
-          - db_engine_name: mariadb
-            db_engine_version: '9.7.0'
-
-          - db_engine_version: '10.11.8'
-            ansible: stable-2.17
-
-          - db_engine_version: '10.11.8'
-            ansible: stable-2.21
-
-          - db_engine_version: '10.11.8'
-            ansible: devel
 
           - db_engine_version: '8.4.9'
             connector_version: '2.0.1'
@@ -92,56 +51,27 @@ jobs:
           - db_engine_version: '8.4.9'
             connector_version: '2.0.3'
 
-          - db_engine_version: '10.11.8'
-            connector_version: '2.0.1'
-
-          - db_engine_version: '10.11.8'
-            connector_version: '2.0.1'
-
     services:
       db_primary:
         image: docker.io/library/${{ matrix.db_engine_name }}:${{ matrix.db_engine_version }}
         env:
-          MARIADB_ROOT_PASSWORD: msandbox
           MYSQL_ROOT_PASSWORD: msandbox
         ports:
           - 3307:3306
-        # We write our own health-cmd because the mariadb container does not
-        # provide a healthcheck
-        options: >-
-          --health-cmd "${{ matrix.db_engine_name == 'mysql' && 'mysqladmin' || 'mariadb-admin' }} ping -P 3306 -pmsandbox |grep alive || exit 1"
-          --health-start-period 10s
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 6
 
       db_replica1:
         image: docker.io/library/${{ matrix.db_engine_name }}:${{ matrix.db_engine_version }}
         env:
-          MARIADB_ROOT_PASSWORD: msandbox
           MYSQL_ROOT_PASSWORD: msandbox
         ports:
           - 3308:3306
-        options: >-
-          --health-cmd "${{ matrix.db_engine_name == 'mysql' && 'mysqladmin' || 'mariadb-admin' }} ping -P 3306 -pmsandbox |grep alive || exit 1"
-          --health-start-period 10s
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 6
 
       db_replica2:
         image: docker.io/library/${{ matrix.db_engine_name }}:${{ matrix.db_engine_version }}
         env:
-          MARIADB_ROOT_PASSWORD: msandbox
           MYSQL_ROOT_PASSWORD: msandbox
         ports:
           - 3309:3306
-        options: >-
-          --health-cmd "${{ matrix.db_engine_name == 'mysql' && 'mysqladmin' || 'mariadb-admin' }} ping -P 3306 -pmsandbox |grep alive || exit 1"
-          --health-start-period 10s
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 6
 
     steps:
 
