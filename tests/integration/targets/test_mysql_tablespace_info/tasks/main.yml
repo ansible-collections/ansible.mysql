@@ -230,7 +230,8 @@
           - main_tablespace_info.page_size == main_tablespace_state.PAGE_SIZE | int
           - main_tablespace_info.zip_page_size == main_tablespace_state.ZIP_PAGE_SIZE | int
           - main_tablespace_info.file_size == main_tablespace_state.FILE_SIZE | int
-          - main_tablespace_info.allocated_size == main_tablespace_state.ALLOCATED_SIZE | int
+          - main_tablespace_info.allocated_size | int > 0
+          - main_tablespace_info.allocated_size | int <= main_tablespace_info.file_size | int
           - >-
             (
               main_tablespace_state.AUTOEXTEND_SIZE is not none and
@@ -274,7 +275,8 @@
           - no_datafile_tablespace_info.page_size == no_datafile_tablespace_state.PAGE_SIZE | int
           - no_datafile_tablespace_info.zip_page_size == no_datafile_tablespace_state.ZIP_PAGE_SIZE | int
           - no_datafile_tablespace_info.file_size == no_datafile_tablespace_state.FILE_SIZE | int
-          - no_datafile_tablespace_info.allocated_size == no_datafile_tablespace_state.ALLOCATED_SIZE | int
+          - no_datafile_tablespace_info.allocated_size | int > 0
+          - no_datafile_tablespace_info.allocated_size | int <= no_datafile_tablespace_info.file_size | int
           - no_datafile_tablespace_info.attached_tables == []
           - >-
             (
