@@ -148,7 +148,7 @@ jobs:
       # No need to check for service health. GitHub Action took care of it.
 
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Restart MySQL server with settings for replication
         run: |
