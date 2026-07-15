@@ -319,7 +319,42 @@
         that:
           - single_tablespace_info is not changed
           - single_tablespace_info.tablespaces | length == 1
-          - single_tablespace_info.tablespaces == [main_tablespace_info]
+          - single_tablespace_info.tablespaces[0].name == main_tablespace_info.name
+          - single_tablespace_info.tablespaces[0].space_id == main_tablespace_info.space_id
+          - single_tablespace_info.tablespaces[0].datafile == main_tablespace_info.datafile
+          - single_tablespace_info.tablespaces[0].attached_tables == main_tablespace_info.attached_tables
+          - single_tablespace_info.tablespaces[0].page_size == main_tablespace_info.page_size
+          - single_tablespace_info.tablespaces[0].zip_page_size == main_tablespace_info.zip_page_size
+          - >-
+            (
+              'autoextend_size' in main_tablespace_info and
+              single_tablespace_info.tablespaces[0].autoextend_size == main_tablespace_info.autoextend_size
+            )
+            or
+            (
+              'autoextend_size' not in main_tablespace_info and
+              'autoextend_size' not in single_tablespace_info.tablespaces[0]
+            )
+          - >-
+            (
+              'encryption' in main_tablespace_info and
+              single_tablespace_info.tablespaces[0].encryption == main_tablespace_info.encryption
+            )
+            or
+            (
+              'encryption' not in main_tablespace_info and
+              'encryption' not in single_tablespace_info.tablespaces[0]
+            )
+          - >-
+            (
+              'state' in main_tablespace_info and
+              single_tablespace_info.tablespaces[0].state == main_tablespace_info.state
+            )
+            or
+            (
+              'state' not in main_tablespace_info and
+              'state' not in single_tablespace_info.tablespaces[0]
+            )
 
     - name: Tablespace info | Detect keyring plugin and component table
       ansible.mysql.mysql_query:
