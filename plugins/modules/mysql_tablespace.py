@@ -123,6 +123,13 @@ EXAMPLES = r'''
     datafile: ./app_data.ibd
     login_unix_socket: /run/mysqld/mysqld.sock
 
+- name: Create a MySQL general tablespace with file block and autoextend settings
+  ansible.mysql.mysql_tablespace:
+    name: analytics_data
+    datafile: ./analytics_data.ibd
+    file_block_size: 8192
+    autoextend_size: 4194304
+
 - name: Enable encryption on a MySQL tablespace
   ansible.mysql.mysql_tablespace:
     name: app_data
@@ -152,6 +159,41 @@ tablespace:
     - In create check mode, this is a predicted subset derived from requested values because no post-create server metadata exists yet.
   returned: when O(state) is V(present)
   type: dict
+  contains:
+    server_implementation:
+      description: Server implementation that produced the result.
+      type: str
+      sample: mysql
+    name:
+      description: Tablespace name after module execution.
+      type: str
+      sample: app_data
+    datafile:
+      description: Tablespace datafile path when available.
+      type: str
+      sample: ./app_data.ibd
+    autoextend_size:
+      description: Autoextend size in bytes when available.
+      type: int
+      sample: 4194304
+    encryption:
+      description: Encryption state when available.
+      type: str
+      sample: N
+    page_size:
+      description: InnoDB page size in bytes when available.
+      type: int
+      sample: 16384
+    zip_page_size:
+      description: Compressed page size in bytes when available.
+      type: int
+      sample: 8192
+    attached_tables:
+      description: Tables attached to the tablespace when the server exposes them.
+      type: list
+      elements: str
+      sample:
+        - app/orders
 '''
 
 from ansible.module_utils.basic import AnsibleModule
@@ -212,6 +254,8 @@ def validate_file_block_size_input(file_block_size):
 
 def get_tablespace_file_block_size(tablespace):
     zip_page_size = tablespace.get('zip_page_size')
+    # A ZIP page size of 0 means "not compressed", so the intentional falsy check
+    # falls back to page_size instead of treating 0 as an actual file block size.
     if zip_page_size:
         return zip_page_size
     return tablespace.get('page_size')
@@ -287,7 +331,7 @@ def build_create_query(name, datafile=None, file_block_size=None, encryption=Non
     return ' '.join(query)
 
 
-def build_alter_queries(name, current, rename_to=None, encryption=None, autoextend_size=None):
+def build_alter_queries(current, rename_to=None, encryption=None, autoextend_size=None):
     queries = []
     target_name = current['name']
 
@@ -612,7 +656,6 @@ def main():
         )
 
     queries = build_alter_queries(
-        current['name'],
         current,
         rename_to=rename_to,
         encryption=encryption,

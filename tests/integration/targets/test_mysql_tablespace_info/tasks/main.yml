@@ -1,0 +1,406 @@
+---
+- name: Tablespace info | Run MySQL metadata checks
+  vars:
+    mysql_parameters: &mysql_params
+      login_user: '{{ mysql_user }}'
+      login_password: '{{ mysql_password }}'
+      login_host: '{{ mysql_host }}'
+      login_port: '{{ mysql_primary_port }}'
+    tablespace_name: ansible_tablespace_info_main
+    no_datafile_tablespace_name: ansible_tablespace_info_nodata
+    missing_tablespace_name: ansible_tablespace_info_missing
+    tablespace_schema: ansible_tablespace_info_db
+    tablespace_table: orders
+    tablespace_datafile: ./ansible_tablespace_info_main.ibd
+    create_autoextend_size: 4194304
+    create_file_block_size: 8192
+    create_encryption: N
+  when: db_engine == 'mysql'
+  block:
+    - name: Tablespace info | Set MySQL feature facts
+      ansible.builtin.set_fact:
+        mysql_supports_optional_datafile: "{{ db_version is version('8.0.14', '>=') }}"
+        mysql_metadata_tablespaces: >-
+          {{
+            'INFORMATION_SCHEMA.INNODB_TABLESPACES'
+            if db_version is version('8.0.0', '>=')
+            else 'INFORMATION_SCHEMA.INNODB_SYS_TABLESPACES'
+          }}
+        mysql_metadata_datafiles: >-
+          {{
+            'INFORMATION_SCHEMA.INNODB_DATAFILES'
+            if db_version is version('8.0.0', '>=')
+            else 'INFORMATION_SCHEMA.INNODB_SYS_DATAFILES'
+          }}
+        mysql_metadata_tables: >-
+          {{
+            'INFORMATION_SCHEMA.INNODB_TABLES'
+            if db_version is version('8.0.0', '>=')
+            else 'INFORMATION_SCHEMA.INNODB_SYS_TABLES'
+          }}
+        expected_tablespace_names: >-
+          {{
+            [tablespace_name] +
+            ([no_datafile_tablespace_name] if db_version is version('8.0.14', '>=') else [])
+          }}
+
+    - name: Tablespace info | Remove test database if present
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query: "DROP DATABASE IF EXISTS {{ tablespace_schema }}"
+
+    - name: Tablespace info | Ensure primary tablespace is absent before tests
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ tablespace_name }}'
+        state: absent
+
+    - name: Tablespace info | Ensure no-datafile tablespace is absent before tests
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ no_datafile_tablespace_name }}'
+        state: absent
+
+    - name: Tablespace info | Create tablespace without datafile on supported MySQL
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ no_datafile_tablespace_name }}'
+      when: mysql_supports_optional_datafile
+
+    - name: Tablespace info | Create tablespace fixture
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        encryption: "{{ create_encryption if db_version is version('8.0.13', '>=') else omit }}"
+        autoextend_size: "{{ create_autoextend_size if db_version is version('8.0.23', '>=') else omit }}"
+
+    - name: Tablespace info | Create database and attach table fixture
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query:
+          - "CREATE DATABASE {{ tablespace_schema }}"
+          - >-
+            CREATE TABLE {{ tablespace_schema }}.{{ tablespace_table }} (
+            id INT PRIMARY KEY
+            ) ENGINE=InnoDB ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8
+            TABLESPACE {{ tablespace_name }}
+
+    - name: Tablespace info | Query direct tablespace metadata
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query: >-
+          SELECT f.FILE_ID, f.TABLESPACE_NAME, COALESCE(df.PATH, f.FILE_NAME) AS FILE_NAME,
+          f.STATUS, f.EXTENT_SIZE, f.AUTOEXTEND_SIZE, ts.PAGE_SIZE, ts.ZIP_PAGE_SIZE,
+          ts.FILE_SIZE, ts.ALLOCATED_SIZE,
+          {% if db_version is version('8.0.13', '>=') %}ts.ENCRYPTION,{% else %}NULL AS ENCRYPTION,{% endif %}
+          {% if db_version is version('8.0.14', '>=') %}ts.STATE,{% else %}NULL AS STATE,{% endif %}
+          GROUP_CONCAT(t.NAME ORDER BY t.NAME SEPARATOR ',') AS ATTACHED_TABLES
+          FROM INFORMATION_SCHEMA.FILES AS f
+          LEFT JOIN {{ mysql_metadata_tablespaces }} AS ts ON ts.SPACE = f.FILE_ID
+          LEFT JOIN {{ mysql_metadata_datafiles }} AS df ON df.SPACE = ts.SPACE
+          LEFT JOIN {{ mysql_metadata_tables }} AS t ON t.SPACE = ts.SPACE
+          WHERE f.FILE_TYPE = 'TABLESPACE'
+          AND (
+          f.TABLESPACE_NAME = '{{ tablespace_name }}'
+          {% if mysql_supports_optional_datafile %}
+          OR f.TABLESPACE_NAME = '{{ no_datafile_tablespace_name }}'
+          {% endif %}
+          )
+          GROUP BY f.FILE_ID, f.TABLESPACE_NAME, df.PATH, f.FILE_NAME, f.STATUS,
+          f.EXTENT_SIZE, f.AUTOEXTEND_SIZE, ts.PAGE_SIZE, ts.ZIP_PAGE_SIZE,
+          ts.FILE_SIZE, ts.ALLOCATED_SIZE
+          {% if db_version is version('8.0.13', '>=') %}, ts.ENCRYPTION{% endif %}
+          {% if db_version is version('8.0.14', '>=') %}, ts.STATE{% endif %}
+          ORDER BY f.TABLESPACE_NAME
+      register: tablespace_metadata_state
+
+    - name: Tablespace info | Assert direct fixture metadata
+      ansible.builtin.assert:
+        that:
+          - tablespace_metadata_state.query_result[0] | length == expected_tablespace_names | length
+          - >-
+            (tablespace_metadata_state.query_result[0]
+            | selectattr('TABLESPACE_NAME', 'equalto', tablespace_name)
+            | list
+            | length) == 1
+          - >-
+            (
+              not mysql_supports_optional_datafile
+            )
+            or
+            (
+              tablespace_metadata_state.query_result[0]
+              | selectattr('TABLESPACE_NAME', 'equalto', no_datafile_tablespace_name)
+              | list
+              | length
+            ) == 1
+
+    - name: Tablespace info | Capture direct metadata rows
+      ansible.builtin.set_fact:
+        main_tablespace_state: >-
+          {{
+            (tablespace_metadata_state.query_result[0]
+            | selectattr('TABLESPACE_NAME', 'equalto', tablespace_name)
+            | list
+            | first)
+          }}
+
+    - name: Tablespace info | Capture no-datafile metadata row
+      ansible.builtin.set_fact:
+        no_datafile_tablespace_state: >-
+          {{
+            (tablespace_metadata_state.query_result[0]
+            | selectattr('TABLESPACE_NAME', 'equalto', no_datafile_tablespace_name)
+            | list
+            | first)
+          }}
+      when: mysql_supports_optional_datafile
+
+    - name: Tablespace info | Gather missing tablespace info
+      ansible.mysql.mysql_tablespace_info:
+        <<: *mysql_params
+        name: '{{ missing_tablespace_name }}'
+      register: missing_tablespace_info
+
+    - name: Tablespace info | Assert missing tablespace result
+      ansible.builtin.assert:
+        that:
+          - missing_tablespace_info is not changed
+          - missing_tablespace_info.tablespaces | length == 0
+
+    - name: Tablespace info | Gather all tablespace info
+      ansible.mysql.mysql_tablespace_info:
+        <<: *mysql_params
+      register: all_tablespaces_info
+
+    - name: Tablespace info | Capture fixture rows from list-all result
+      ansible.builtin.set_fact:
+        fixture_tablespaces_info: >-
+          {{
+            (all_tablespaces_info.tablespaces
+            | selectattr('name', 'equalto', tablespace_name)
+            | list)
+            +
+            (
+              (all_tablespaces_info.tablespaces
+              | selectattr('name', 'equalto', no_datafile_tablespace_name)
+              | list)
+              if mysql_supports_optional_datafile else []
+            )
+          }}
+
+    - name: Tablespace info | Assert list-all result
+      ansible.builtin.assert:
+        that:
+          - all_tablespaces_info is not changed
+          - fixture_tablespaces_info | length == expected_tablespace_names | length
+          - fixture_tablespaces_info | map(attribute='name') | sort == expected_tablespace_names | sort
+
+    - name: Tablespace info | Capture fixture tablespace info rows
+      ansible.builtin.set_fact:
+        main_tablespace_info: >-
+          {{
+            (fixture_tablespaces_info
+            | selectattr('name', 'equalto', tablespace_name)
+            | list
+            | first)
+          }}
+
+    - name: Tablespace info | Capture no-datafile tablespace info row
+      ansible.builtin.set_fact:
+        no_datafile_tablespace_info: >-
+          {{
+            (fixture_tablespaces_info
+            | selectattr('name', 'equalto', no_datafile_tablespace_name)
+            | list
+            | first)
+          }}
+      when: mysql_supports_optional_datafile
+
+    - name: Tablespace info | Assert primary tablespace metadata
+      ansible.builtin.assert:
+        that:
+          - main_tablespace_info.name == main_tablespace_state.TABLESPACE_NAME
+          - main_tablespace_info.space_id == main_tablespace_state.FILE_ID | int
+          - main_tablespace_info.datafile == main_tablespace_state.FILE_NAME
+          - main_tablespace_info.extent_size == main_tablespace_state.EXTENT_SIZE | int
+          - main_tablespace_info.status == main_tablespace_state.STATUS
+          - main_tablespace_info.page_size == main_tablespace_state.PAGE_SIZE | int
+          - main_tablespace_info.zip_page_size == main_tablespace_state.ZIP_PAGE_SIZE | int
+          - main_tablespace_info.file_size == main_tablespace_state.FILE_SIZE | int
+          - main_tablespace_info.allocated_size == main_tablespace_state.ALLOCATED_SIZE | int
+          - >-
+            (
+              main_tablespace_state.AUTOEXTEND_SIZE is not none and
+              main_tablespace_info.autoextend_size == (main_tablespace_state.AUTOEXTEND_SIZE | int)
+            )
+            or
+            (
+              main_tablespace_state.AUTOEXTEND_SIZE is none and
+              'autoextend_size' not in main_tablespace_info
+            )
+          - main_tablespace_info.attached_tables == [tablespace_schema ~ '/' ~ tablespace_table]
+          - >-
+            (
+              main_tablespace_state.ENCRYPTION is not none and
+              main_tablespace_info.encryption == main_tablespace_state.ENCRYPTION
+            )
+            or
+            (
+              main_tablespace_state.ENCRYPTION is none and
+              'encryption' not in main_tablespace_info
+            )
+          - >-
+            (
+              main_tablespace_state.STATE is not none and
+              main_tablespace_info.state == main_tablespace_state.STATE
+            )
+            or
+            (
+              main_tablespace_state.STATE is none and
+              'state' not in main_tablespace_info
+            )
+
+    - name: Tablespace info | Assert no-datafile tablespace metadata
+      ansible.builtin.assert:
+        that:
+          - no_datafile_tablespace_info.name == no_datafile_tablespace_state.TABLESPACE_NAME
+          - no_datafile_tablespace_info.space_id == no_datafile_tablespace_state.FILE_ID | int
+          - no_datafile_tablespace_info.datafile == no_datafile_tablespace_state.FILE_NAME
+          - no_datafile_tablespace_info.extent_size == no_datafile_tablespace_state.EXTENT_SIZE | int
+          - no_datafile_tablespace_info.status == no_datafile_tablespace_state.STATUS
+          - no_datafile_tablespace_info.page_size == no_datafile_tablespace_state.PAGE_SIZE | int
+          - no_datafile_tablespace_info.zip_page_size == no_datafile_tablespace_state.ZIP_PAGE_SIZE | int
+          - no_datafile_tablespace_info.file_size == no_datafile_tablespace_state.FILE_SIZE | int
+          - no_datafile_tablespace_info.allocated_size == no_datafile_tablespace_state.ALLOCATED_SIZE | int
+          - no_datafile_tablespace_info.attached_tables == []
+          - >-
+            (
+              no_datafile_tablespace_state.AUTOEXTEND_SIZE is not none and
+              no_datafile_tablespace_info.autoextend_size == (no_datafile_tablespace_state.AUTOEXTEND_SIZE | int)
+            )
+            or
+            (
+              no_datafile_tablespace_state.AUTOEXTEND_SIZE is none and
+              'autoextend_size' not in no_datafile_tablespace_info
+            )
+          - >-
+            (
+              no_datafile_tablespace_state.ENCRYPTION is not none and
+              no_datafile_tablespace_info.encryption == no_datafile_tablespace_state.ENCRYPTION
+            )
+            or
+            (
+              no_datafile_tablespace_state.ENCRYPTION is none and
+              'encryption' not in no_datafile_tablespace_info
+            )
+          - >-
+            (
+              no_datafile_tablespace_state.STATE is not none and
+              no_datafile_tablespace_info.state == no_datafile_tablespace_state.STATE
+            )
+            or
+            (
+              no_datafile_tablespace_state.STATE is none and
+              'state' not in no_datafile_tablespace_info
+            )
+      when: mysql_supports_optional_datafile
+
+    - name: Tablespace info | Gather one tablespace by name
+      ansible.mysql.mysql_tablespace_info:
+        <<: *mysql_params
+        name: '{{ tablespace_name }}'
+      register: single_tablespace_info
+
+    - name: Tablespace info | Assert name-filtered result
+      ansible.builtin.assert:
+        that:
+          - single_tablespace_info is not changed
+          - single_tablespace_info.tablespaces | length == 1
+          - single_tablespace_info.tablespaces == [main_tablespace_info]
+
+    - name: Tablespace info | Detect keyring plugin and component table
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query:
+          - >-
+            SELECT COUNT(*) AS plugin_count
+            FROM INFORMATION_SCHEMA.PLUGINS
+            WHERE PLUGIN_STATUS = 'ACTIVE' AND PLUGIN_NAME LIKE 'keyring%'
+          - >-
+            SELECT COUNT(*) AS component_table_count
+            FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_SCHEMA = 'mysql' AND TABLE_NAME = 'component'
+      register: keyring_detection_state
+      when: db_version is version('8.0.13', '>=')
+
+    - name: Tablespace info | Detect keyring component
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query: >-
+          SELECT COUNT(*) AS component_count
+          FROM mysql.component
+          WHERE component_urn LIKE 'file://component_keyring%'
+          OR component_urn LIKE 'file://component_keyring_%'
+      register: keyring_component_state
+      when:
+        - db_version is version('8.0.13', '>=')
+        - keyring_detection_state.query_result[1][0].component_table_count | int == 1
+
+    - name: Tablespace info | Set keyring availability facts
+      ansible.builtin.set_fact:
+        mysql_keyring_available: >-
+          {{
+            (keyring_detection_state.query_result[0][0].plugin_count | int) > 0 or
+            ((keyring_component_state.query_result[0][0].component_count | int) if keyring_component_state is defined else 0) > 0
+          }}
+      when: db_version is version('8.0.13', '>=')
+
+    - name: Tablespace info | Enable encryption fixture when keyring is available
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ tablespace_name }}'
+        datafile: '{{ tablespace_datafile }}'
+        file_block_size: '{{ create_file_block_size }}'
+        encryption: Y
+      when:
+        - db_version is version('8.0.13', '>=')
+        - mysql_keyring_available
+
+    - name: Tablespace info | Gather encrypted tablespace info
+      ansible.mysql.mysql_tablespace_info:
+        <<: *mysql_params
+        name: '{{ tablespace_name }}'
+      register: encrypted_tablespace_info
+      when:
+        - db_version is version('8.0.13', '>=')
+        - mysql_keyring_available
+
+    - name: Tablespace info | Assert encrypted tablespace info
+      ansible.builtin.assert:
+        that:
+          - encrypted_tablespace_info is not changed
+          - encrypted_tablespace_info.tablespaces | length == 1
+          - encrypted_tablespace_info.tablespaces[0].encryption == 'Y'
+      when:
+        - db_version is version('8.0.13', '>=')
+        - mysql_keyring_available
+  always:
+    - name: Tablespace info | Drop test database after coverage
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        query: "DROP DATABASE IF EXISTS {{ tablespace_schema }}"
+
+    - name: Tablespace info | Drop primary tablespace after coverage
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ tablespace_name }}'
+        state: absent
+
+    - name: Tablespace info | Drop no-datafile tablespace after coverage
+      ansible.mysql.mysql_tablespace:
+        <<: *mysql_params
+        name: '{{ no_datafile_tablespace_name }}'
+        state: absent

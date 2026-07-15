@@ -201,7 +201,6 @@ def test_build_create_query_includes_supported_create_options():
 
 def test_build_alter_queries_split_mutable_changes_into_valid_statements():
     assert build_alter_queries(
-        'app_data',
         make_tablespace(),
         rename_to='archive_data',
         encryption='Y',
@@ -362,7 +361,6 @@ def test_fail_if_create_only_options_differ_accepts_matching_state():
 
 def test_build_alter_queries_return_empty_list_when_requested_state_matches_current():
     assert build_alter_queries(
-        'app_data',
         make_tablespace(),
         rename_to='app_data',
         encryption='N',

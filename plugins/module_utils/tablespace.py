@@ -78,7 +78,7 @@ def _normalize_mysql_tablespace_row(row):
     return {
         'server_implementation': 'mysql',
         'name': row['TABLESPACE_NAME'],
-        'space_id': _to_int_or_none(_first_defined(row, 'FILE_ID', 'SPACE')),
+        'space_id': _to_int_or_none(row.get('FILE_ID')),
         'engine': row['ENGINE'],
         'file_type': row.get('FILE_TYPE'),
         'extent_size': _to_int_or_none(row.get('EXTENT_SIZE')),
