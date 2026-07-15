@@ -23,6 +23,24 @@
         name: '{{ test_db }}'
         state: present
 
+    - name: Partition | Create config file for default database fallback
+      ansible.builtin.tempfile:
+        state: file
+        suffix: .cnf
+      register: mysql_partition_config_file
+
+    - name: Partition | Write config file for default database fallback
+      ansible.builtin.copy:
+        dest: '{{ mysql_partition_config_file.path }}'
+        mode: '0600'
+        content: |
+          [client]
+          user={{ mysql_user }}
+          password={{ mysql_password }}
+          host={{ mysql_host }}
+          port={{ mysql_primary_port }}
+          database={{ test_db }}
+
     - name: Partition | Create RANGE partitioned table
       ansible.mysql.mysql_query:
         <<: *mysql_params
@@ -54,6 +72,62 @@
             PARTITION p_west VALUES IN (4, 5, 6)
           )
 
+    - name: Partition | Create RANGE COLUMNS partitioned table
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        login_db: '{{ test_db }}'
+        query: |
+          CREATE TABLE IF NOT EXISTS events_by_month (
+            id INT NOT NULL,
+            created_on DATE NOT NULL,
+            data VARCHAR(100),
+            PRIMARY KEY (id, created_on)
+          ) PARTITION BY RANGE COLUMNS (created_on) (
+            PARTITION p202401 VALUES LESS THAN ('2024-02-01'),
+            PARTITION p202402 VALUES LESS THAN ('2024-03-01')
+          )
+
+    - name: Partition | Create LIST COLUMNS partitioned table
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        login_db: '{{ test_db }}'
+        query: |
+          CREATE TABLE IF NOT EXISTS sales_regions (
+            id INT NOT NULL,
+            region_code CHAR(2) NOT NULL,
+            amount DECIMAL(10,2),
+            PRIMARY KEY (id, region_code)
+          ) PARTITION BY LIST COLUMNS (region_code) (
+            PARTITION p_eu VALUES IN ('de', 'fr'),
+            PARTITION p_us VALUES IN ('us')
+          )
+
+    - name: Partition | Create HASH partitioned table
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        login_db: '{{ test_db }}'
+        query: |
+          CREATE TABLE IF NOT EXISTS sessions (
+            id INT NOT NULL AUTO_INCREMENT,
+            user_id INT NOT NULL,
+            data VARCHAR(100),
+            PRIMARY KEY (id, user_id)
+          ) PARTITION BY HASH (user_id)
+          PARTITIONS 4
+
+    - name: Partition | Create KEY partitioned table
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        login_db: '{{ test_db }}'
+        query: |
+          CREATE TABLE IF NOT EXISTS key_sessions (
+            id INT NOT NULL,
+            session_key VARCHAR(32) NOT NULL,
+            data VARCHAR(100),
+            PRIMARY KEY (id, session_key)
+          ) PARTITION BY KEY (session_key)
+          PARTITIONS 2
+
     - name: Partition | Insert test data into RANGE table
       ansible.mysql.mysql_query:
         <<: *mysql_params
@@ -83,8 +157,7 @@
         table: plain_table
         schema: '{{ test_db }}'
         action: check
-        partitions:
-          - ALL
+        name: ALL
       register: result
       ignore_errors: true
 
@@ -100,7 +173,7 @@
         table: events
         schema: '{{ test_db }}'
         action: add
-        partition_name: p2023
+        name: p2023
         value: "2024"
       check_mode: true
       register: result
@@ -136,7 +209,7 @@
         table: events
         schema: '{{ test_db }}'
         action: add
-        partition_name: p2023
+        name: p2023
         value: "2024"
       register: result
 
@@ -146,6 +219,10 @@
           - result is changed
           - result.queries | length == 1
           - result.partition_info | length == 4
+          - "(result.partition_info | selectattr('PARTITION_NAME', 'equalto', 'p2023') | list | length) == 1"
+          - "(result.partition_info | selectattr('PARTITION_NAME', 'equalto', 'p2023') | map(attribute='PARTITION_METHOD') | list | first) == 'RANGE'"
+          - "(result.partition_info | selectattr('PARTITION_NAME', 'equalto', 'p2023') | map(attribute='PARTITION_DESCRIPTION') | list | first) == '2024'"
+          - "(result.partition_info[0] | dict2items | map(attribute='key') | list | sort) == ['PARTITION_DESCRIPTION', 'PARTITION_EXPRESSION', 'PARTITION_METHOD', 'PARTITION_NAME', 'PARTITION_ORDINAL_POSITION', 'TABLE_ROWS']"
 
     - name: Partition | Verify partition exists
       ansible.mysql.mysql_query:
@@ -169,7 +246,7 @@
         table: events
         schema: '{{ test_db }}'
         action: add
-        partition_name: p2023
+        name: p2023
         value: "2024"
       register: result
 
@@ -179,13 +256,46 @@
           - result is not changed
           - "'already exists' in result.msg"
 
+    - name: Partition | Use schema fallback from selected database
+      ansible.mysql.mysql_partition:
+        <<: *mysql_params
+        config_file: '{{ mysql_partition_config_file.path }}'
+        table: events
+        action: check
+        name: ALL
+      register: result
+
+    - name: Partition | Assert schema fallback
+      ansible.builtin.assert:
+        that:
+          - result is changed
+          - "'CHECK PARTITION ALL' in result.queries[0]"
+          - test_db in result.queries[0]
+
+    - name: Partition | Add RANGE COLUMNS partition
+      ansible.mysql.mysql_partition:
+        <<: *mysql_params
+        table: events_by_month
+        schema: '{{ test_db }}'
+        action: add
+        name: p202403
+        value: "'2024-04-01'"
+      register: result
+
+    - name: Partition | Assert RANGE COLUMNS add result
+      ansible.builtin.assert:
+        that:
+          - result is changed
+          - "'VALUES LESS THAN' in result.queries[0]"
+          - "(result.partition_info | selectattr('PARTITION_NAME', 'equalto', 'p202403') | list | length) == 1"
+
     - name: Partition | Add LIST partition
       ansible.mysql.mysql_partition:
         <<: *mysql_params
         table: sales
         schema: '{{ test_db }}'
         action: add
-        partition_name: p_south
+        name: p_south
         value: "7, 8, 9"
       register: result
 
@@ -195,6 +305,7 @@
           - result is changed
           - "'VALUES IN' in result.queries[0]"
           - result.partition_info | length == 3
+          - "(result.partition_info | selectattr('PARTITION_NAME', 'equalto', 'p_south') | list | length) == 1"
 
     - name: Partition | Add LIST partition idempotency
       ansible.mysql.mysql_partition:
@@ -202,7 +313,7 @@
         table: sales
         schema: '{{ test_db }}'
         action: add
-        partition_name: p_south
+        name: p_south
         value: "7, 8, 9"
       register: result
 
@@ -211,14 +322,30 @@
         that:
           - result is not changed
 
+    - name: Partition | Add LIST COLUMNS partition
+      ansible.mysql.mysql_partition:
+        <<: *mysql_params
+        table: sales_regions
+        schema: '{{ test_db }}'
+        action: add
+        name: p_apac
+        value: "'jp', 'sg'"
+      register: result
+
+    - name: Partition | Assert LIST COLUMNS add result
+      ansible.builtin.assert:
+        that:
+          - result is changed
+          - "'VALUES IN' in result.queries[0]"
+          - "(result.partition_info | selectattr('PARTITION_NAME', 'equalto', 'p_apac') | list | length) == 1"
+
     - name: Partition | Truncate partition in check mode
       ansible.mysql.mysql_partition:
         <<: *mysql_params
         table: events
         schema: '{{ test_db }}'
         action: truncate
-        partitions:
-          - p2020
+        name: p2020
       check_mode: true
       register: result
 
@@ -247,8 +374,7 @@
         table: events
         schema: '{{ test_db }}'
         action: truncate
-        partitions:
-          - p2020
+        name: p2020
       register: result
 
     - name: Partition | Assert truncate result
@@ -275,7 +401,7 @@
         table: events
         schema: '{{ test_db }}'
         action: reorganize
-        partitions:
+        name:
           - p2021
           - p2022
         into:
@@ -313,7 +439,7 @@
         table: events
         schema: '{{ test_db }}'
         action: reorganize
-        partitions:
+        name:
           - p2021
           - p2022
         into:
@@ -377,8 +503,7 @@
         table: events
         schema: '{{ test_db }}'
         action: reorganize
-        partitions:
-          - p2021_2022
+        name: p2021_2022
         into:
           - name: p2021_new
             value: "2022"
@@ -407,14 +532,49 @@
         that:
           - result.rowcount[0] == 2
 
+    - name: Partition | Reorganize LIST partition
+      ansible.mysql.mysql_partition:
+        <<: *mysql_params
+        table: sales
+        schema: '{{ test_db }}'
+        action: reorganize
+        name: p_south
+        into:
+          - name: p_central
+            value: "7,8"
+          - name: p_south_new
+            value: "9"
+      register: result
+
+    - name: Partition | Assert LIST reorganize result
+      ansible.builtin.assert:
+        that:
+          - result is changed
+          - "'REORGANIZE PARTITION' in result.queries[0]"
+
+    - name: Partition | Verify LIST reorganize partitions exist
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        login_db: '{{ test_db }}'
+        query: >
+          SELECT PARTITION_NAME
+          FROM INFORMATION_SCHEMA.PARTITIONS
+          WHERE TABLE_SCHEMA = '{{ test_db }}' AND TABLE_NAME = 'sales'
+          AND PARTITION_NAME IN ('p_central', 'p_south_new')
+      register: result
+
+    - name: Partition | Assert LIST reorganize partitions present
+      ansible.builtin.assert:
+        that:
+          - result.rowcount[0] == 2
+
     - name: Partition | Drop partition in check mode
       ansible.mysql.mysql_partition:
         <<: *mysql_params
         table: events
         schema: '{{ test_db }}'
         action: drop
-        partitions:
-          - p2020
+        name: p2020
       check_mode: true
       register: result
 
@@ -446,8 +606,7 @@
         table: events
         schema: '{{ test_db }}'
         action: drop
-        partitions:
-          - p2020
+        name: p2020
       register: result
 
     - name: Partition | Assert drop result
@@ -478,8 +637,7 @@
         table: events
         schema: '{{ test_db }}'
         action: drop
-        partitions:
-          - p2020
+        name: p2020
       register: result
 
     - name: Partition | Assert drop idempotency
@@ -493,8 +651,7 @@
         table: events
         schema: '{{ test_db }}'
         action: check
-        partitions:
-          - p2021_new
+        name: p2021_new
       register: result
 
     - name: Partition | Assert check result
@@ -509,8 +666,7 @@
         table: events
         schema: '{{ test_db }}'
         action: analyze
-        partitions:
-          - ALL
+        name: ALL
       register: result
 
     - name: Partition | Assert analyze result
@@ -525,8 +681,7 @@
         table: events
         schema: '{{ test_db }}'
         action: optimize
-        partitions:
-          - p2021_new
+        name: p2021_new
       register: result
 
     - name: Partition | Assert optimize result
@@ -541,8 +696,7 @@
         table: events
         schema: '{{ test_db }}'
         action: repair
-        partitions:
-          - p2021_new
+        name: p2021_new
       register: result
 
     - name: Partition | Assert repair result
@@ -557,8 +711,7 @@
         table: events
         schema: '{{ test_db }}'
         action: check
-        partitions:
-          - p2021_new
+        name: p2021_new
       check_mode: true
       register: result
 
@@ -568,7 +721,42 @@
           - result is changed
           - "'CHECK PARTITION' in result.queries[0]"
 
-    - name: Partition | Fail add without partition_name
+    - name: Partition | Drop multiple partitions
+      ansible.mysql.mysql_partition:
+        <<: *mysql_params
+        table: events
+        schema: '{{ test_db }}'
+        action: drop
+        name:
+          - p2021_new
+          - p2022_new
+      register: result
+
+    - name: Partition | Assert multiple drop result
+      ansible.builtin.assert:
+        that:
+          - result is changed
+          - "'DROP PARTITION' in result.queries[0]"
+          - "'p2021_new' in result.queries[0]"
+          - "'p2022_new' in result.queries[0]"
+
+    - name: Partition | Verify dropped partitions are gone
+      ansible.mysql.mysql_query:
+        <<: *mysql_params
+        login_db: '{{ test_db }}'
+        query: >
+          SELECT PARTITION_NAME
+          FROM INFORMATION_SCHEMA.PARTITIONS
+          WHERE TABLE_SCHEMA = '{{ test_db }}' AND TABLE_NAME = 'events'
+          AND PARTITION_NAME IN ('p2021_new', 'p2022_new')
+      register: result
+
+    - name: Partition | Assert dropped partitions removed
+      ansible.builtin.assert:
+        that:
+          - result.rowcount[0] == 0
+
+    - name: Partition | Fail add without name
       ansible.mysql.mysql_partition:
         <<: *mysql_params
         table: events
@@ -578,11 +766,11 @@
       register: result
       ignore_errors: true
 
-    - name: Partition | Assert missing partition_name error
+    - name: Partition | Assert missing name error
       ansible.builtin.assert:
         that:
           - result is failed
-          - "'partition_name is required' in result.msg"
+          - "'name is required' in result.msg"
 
     - name: Partition | Fail add without value
       ansible.mysql.mysql_partition:
@@ -590,7 +778,7 @@
         table: events
         schema: '{{ test_db }}'
         action: add
-        partition_name: ptest
+        name: ptest
       register: result
       ignore_errors: true
 
@@ -600,7 +788,7 @@
           - result is failed
           - "'value is required' in result.msg"
 
-    - name: Partition | Fail drop without partitions
+    - name: Partition | Fail drop without name
       ansible.mysql.mysql_partition:
         <<: *mysql_params
         table: events
@@ -609,11 +797,11 @@
       register: result
       ignore_errors: true
 
-    - name: Partition | Assert missing partitions error
+    - name: Partition | Assert missing name error for drop
       ansible.builtin.assert:
         that:
           - result is failed
-          - "'partitions is required' in result.msg"
+          - "'name is required' in result.msg"
 
     - name: Partition | Fail reorganize without into
       ansible.mysql.mysql_partition:
@@ -621,8 +809,7 @@
         table: events
         schema: '{{ test_db }}'
         action: reorganize
-        partitions:
-          - p2021
+        name: p2021
       register: result
       ignore_errors: true
 
@@ -632,18 +819,37 @@
           - result is failed
           - "'into is required' in result.msg"
 
-    - name: Partition | Create HASH partitioned table
+    - name: Partition | Add HASH partitions in check mode
+      ansible.mysql.mysql_partition:
+        <<: *mysql_params
+        table: sessions
+        schema: '{{ test_db }}'
+        action: add
+        number: 2
+      check_mode: true
+      register: result
+
+    - name: Partition | Assert HASH add check mode
+      ansible.builtin.assert:
+        that:
+          - result is changed
+          - "'ADD PARTITION PARTITIONS 2' in result.queries[0]"
+
+    - name: Partition | Verify HASH partition count unchanged after check mode
       ansible.mysql.mysql_query:
         <<: *mysql_params
         login_db: '{{ test_db }}'
-        query: |
-          CREATE TABLE IF NOT EXISTS sessions (
-            id INT NOT NULL AUTO_INCREMENT,
-            user_id INT NOT NULL,
-            data VARCHAR(100),
-            PRIMARY KEY (id, user_id)
-          ) PARTITION BY HASH (user_id)
-          PARTITIONS 4
+        query: >
+          SELECT COUNT(*) AS cnt
+          FROM INFORMATION_SCHEMA.PARTITIONS
+          WHERE TABLE_SCHEMA = '{{ test_db }}' AND TABLE_NAME = 'sessions'
+          AND SUBPARTITION_NAME IS NULL
+      register: result
+
+    - name: Partition | Assert HASH partition count unchanged
+      ansible.builtin.assert:
+        that:
+          - result.query_result[0][0]['cnt'] == 4
 
     - name: Partition | Add HASH partitions
       ansible.mysql.mysql_partition:
@@ -661,14 +867,28 @@
           - "'ADD PARTITION PARTITIONS 2' in result.queries[0]"
           - result.partition_info | length == 6
 
+    - name: Partition | Add HASH partitions again
+      ansible.mysql.mysql_partition:
+        <<: *mysql_params
+        table: sessions
+        schema: '{{ test_db }}'
+        action: add
+        number: 2
+      register: result
+
+    - name: Partition | Assert HASH add is not idempotent
+      ansible.builtin.assert:
+        that:
+          - result is changed
+          - result.partition_info | length == 8
+
     - name: Partition | Fail drop on HASH table
       ansible.mysql.mysql_partition:
         <<: *mysql_params
         table: sessions
         schema: '{{ test_db }}'
         action: drop
-        partitions:
-          - p0
+        name: p0
       register: result
       ignore_errors: true
 
@@ -684,8 +904,7 @@
         table: sessions
         schema: '{{ test_db }}'
         action: add
-        partition_name: ptest
-        value: "1"
+        name: ptest
       register: result
       ignore_errors: true
 
@@ -701,11 +920,59 @@
         table: sessions
         schema: '{{ test_db }}'
         action: check
-        partitions:
-          - ALL
+        name: ALL
       register: result
 
     - name: Partition | Assert HASH check result
+      ansible.builtin.assert:
+        that:
+          - result is changed
+
+    - name: Partition | Fail reorganize on HASH table
+      ansible.mysql.mysql_partition:
+        <<: *mysql_params
+        table: sessions
+        schema: '{{ test_db }}'
+        action: reorganize
+        name: p0
+        into:
+          - name: p_new
+            value: "1"
+      register: result
+      ignore_errors: true
+
+    - name: Partition | Assert HASH reorganize failure
+      ansible.builtin.assert:
+        that:
+          - result is failed
+          - "'not supported' in result.msg"
+
+    - name: Partition | Add KEY partitions
+      ansible.mysql.mysql_partition:
+        <<: *mysql_params
+        table: key_sessions
+        schema: '{{ test_db }}'
+        action: add
+        number: 2
+      register: result
+
+    - name: Partition | Assert KEY add result
+      ansible.builtin.assert:
+        that:
+          - result is changed
+          - "'ADD PARTITION PARTITIONS 2' in result.queries[0]"
+          - result.partition_info | length == 4
+
+    - name: Partition | Check KEY partition
+      ansible.mysql.mysql_partition:
+        <<: *mysql_params
+        table: key_sessions
+        schema: '{{ test_db }}'
+        action: check
+        name: ALL
+      register: result
+
+    - name: Partition | Assert KEY check result
       ansible.builtin.assert:
         that:
           - result is changed
@@ -716,8 +983,7 @@
         table: events
         schema: '{{ test_db }}'
         action: truncate
-        partitions:
-          - ALL
+        name: ALL
       register: result
 
     - name: Partition | Assert truncate ALL result

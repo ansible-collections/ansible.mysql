@@ -36,13 +36,13 @@ options:
   action:
     description:
       - Partition operation to perform.
-      - C(add) adds a new partition. For RANGE and LIST types, O(partition_name) and O(value) are required.
+      - V(add) adds a new partition. For RANGE and LIST types, O(name) and O(value) are required.
         For HASH and KEY types, O(number) is required instead.
-      - C(drop) removes partitions. Only valid for RANGE and LIST types.
-      - C(reorganize) splits or merges partitions. Only valid for RANGE and LIST types.
-        Requires O(partitions) and O(into).
-      - C(truncate) removes all rows from specified partitions without dropping them.
-      - C(check), C(repair), C(analyze), and C(optimize) run maintenance operations on specified partitions.
+      - V(drop) removes partitions. Only valid for RANGE and LIST types.
+      - V(reorganize) splits or merges partitions. Only valid for RANGE and LIST types.
+        Requires O(name) and O(into).
+      - V(truncate) removes all rows from specified partitions without dropping them.
+      - V(check), V(repair), V(analyze), and V(optimize) run maintenance operations on specified partitions.
     type: str
     required: true
     choices:
@@ -54,17 +54,22 @@ options:
       - repair
       - analyze
       - optimize
-  partition_name:
+  name:
     description:
-      - Name of the partition to add.
-      - Required when O(action=add) for RANGE and LIST partition types.
-    type: str
+      - Partition name or names to operate on.
+      - For O(action=add) on RANGE and LIST partition types, provide exactly one partition name.
+      - For O(action=drop), O(action=truncate), O(action=check), O(action=repair),
+        O(action=analyze), and O(action=optimize), provide one or more partition names.
+      - For O(action=reorganize), specifies the source partitions to reorganize.
+      - For maintenance and truncate actions, a single-element list containing V(ALL) targets every partition.
+    type: list
+    elements: str
   value:
     description:
       - Partition boundary expression, written as raw SQL.
       - For RANGE partitions, this is the expression used in C(VALUES LESS THAN), for example
-        C(2024), C(MAXVALUE), or C('2024-07-01').
-      - For LIST partitions, this is the expression used in C(VALUES IN), for example C(7, 8, 9).
+        V(2024), V(MAXVALUE), or V('2024-07-01').
+      - For LIST partitions, this is the expression used in C(VALUES IN), for example V(7,8,9).
       - Required when O(action=add) for RANGE and LIST partition types.
     type: str
   number:
@@ -72,15 +77,6 @@ options:
       - Number of partitions to add.
       - Used only when O(action=add) for HASH and KEY partition types.
     type: int
-  partitions:
-    description:
-      - List of partition names to operate on.
-      - Required for O(action=drop), O(action=truncate), O(action=check), O(action=repair),
-        O(action=analyze), and O(action=optimize).
-      - For O(action=reorganize), specifies the source partitions to reorganize.
-      - For maintenance and truncate actions, a single-element list containing C(ALL) targets every partition.
-    type: list
-    elements: str
   into:
     description:
       - List of target partition definitions for reorganize.
@@ -109,6 +105,7 @@ notes:
     They are validated against common SQL injection patterns but are not parameterized.
   - Each invocation runs a single C(ALTER TABLE ... PARTITION) statement.
   - For O(action=add) on HASH or KEY partitions, each call increases the partition count and is not idempotent.
+  - Reducing HASH and KEY partition counts with C(COALESCE PARTITION) is not currently supported.
 
 attributes:
   check_mode:
@@ -118,6 +115,7 @@ attributes:
     details:
       - O(action=add) for RANGE and LIST types is idempotent when the partition already exists.
       - O(action=drop) is idempotent when the partition does not exist.
+      - O(action=reorganize) is idempotent when the target partition layout already matches O(into).
       - Maintenance operations and truncate always report C(changed=true).
       - O(action=add) for HASH and KEY types always reports C(changed=true).
 
@@ -141,7 +139,7 @@ EXAMPLES = r'''
     table: events
     schema: mydb
     action: add
-    partition_name: p2025
+    name: p2025
     value: "2026"
     login_unix_socket: /run/mysqld/mysqld.sock
 
@@ -150,7 +148,7 @@ EXAMPLES = r'''
     table: sales
     schema: mydb
     action: add
-    partition_name: p_south
+    name: p_south
     value: "10, 11, 12"
     login_unix_socket: /run/mysqld/mysqld.sock
 
@@ -167,7 +165,7 @@ EXAMPLES = r'''
     table: events
     schema: mydb
     action: drop
-    partitions:
+    name:
       - p2020
     login_unix_socket: /run/mysqld/mysqld.sock
 
@@ -176,7 +174,7 @@ EXAMPLES = r'''
     table: events
     schema: mydb
     action: reorganize
-    partitions:
+    name:
       - p2024
     into:
       - name: p2024h1
@@ -190,7 +188,7 @@ EXAMPLES = r'''
     table: events
     schema: mydb
     action: truncate
-    partitions:
+    name:
       - p2020
     login_unix_socket: /run/mysqld/mysqld.sock
 
@@ -199,7 +197,7 @@ EXAMPLES = r'''
     table: events
     schema: mydb
     action: analyze
-    partitions:
+    name:
       - ALL
     login_unix_socket: /run/mysqld/mysqld.sock
 
@@ -210,7 +208,7 @@ EXAMPLES = r'''
         table: events
         schema: mydb
         action: add
-        partition_name: p202502
+        name: p202502
         value: "'2025-03-01'"
         login_unix_socket: /run/mysqld/mysqld.sock
 
@@ -219,14 +217,14 @@ EXAMPLES = r'''
         table: events
         schema: mydb
         action: drop
-        partitions:
+        name:
           - p202401
         login_unix_socket: /run/mysqld/mysqld.sock
 '''
 
 RETURN = r'''
 queries:
-  description: List of SQL queries executed or predicted.
+  description: List of SQL queries executed (or that would be executed in check mode).
   returned: always
   type: list
   elements: str
@@ -236,6 +234,37 @@ partition_info:
   returned: success
   type: list
   elements: dict
+  contains:
+    PARTITION_NAME:
+      description: Name of the partition.
+      returned: success
+      type: str
+      sample: p2025
+    PARTITION_METHOD:
+      description: Partitioning method used by the table.
+      returned: success
+      type: str
+      sample: RANGE
+    PARTITION_EXPRESSION:
+      description: Expression used by the table partition definition.
+      returned: success
+      type: str
+      sample: created_year
+    PARTITION_DESCRIPTION:
+      description: Partition boundary or value list as reported by C(INFORMATION_SCHEMA.PARTITIONS).
+      returned: success
+      type: str
+      sample: '2026'
+    PARTITION_ORDINAL_POSITION:
+      description: Position of the partition within the table definition.
+      returned: success
+      type: int
+      sample: 4
+    TABLE_ROWS:
+      description: Estimated number of rows stored in the partition.
+      returned: success
+      type: int
+      sample: 0
 msg:
   description: Human-readable description of the result.
   returned: always
@@ -264,6 +293,7 @@ PARTITION_QUERY = (
     "FROM INFORMATION_SCHEMA.PARTITIONS "
     "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s "
     "AND PARTITION_NAME IS NOT NULL "
+    "AND SUBPARTITION_NAME IS NULL "
     "ORDER BY PARTITION_ORDINAL_POSITION"
 )
 
@@ -300,10 +330,35 @@ def partition_exists(partitions, name):
     return any(p['PARTITION_NAME'] == name for p in partitions)
 
 
+def get_partition(partitions, name):
+    for partition in partitions:
+        if partition['PARTITION_NAME'] == name:
+            return partition
+    return None
+
+
 def get_partition_method(partitions):
     if not partitions:
         return None
     return partitions[0]['PARTITION_METHOD']
+
+
+def normalize_partition_description(value):
+    return ','.join(str(value).strip().split(','))
+
+
+def reorganize_matches_current_state(current_partitions, source_names, into):
+    if any(partition_exists(current_partitions, source_name) for source_name in source_names):
+        return False
+
+    for target in into:
+        current_partition = get_partition(current_partitions, target['name'])
+        if current_partition is None:
+            return False
+        if normalize_partition_description(current_partition['PARTITION_DESCRIPTION']) != normalize_partition_description(target['value']):
+            return False
+
+    return True
 
 
 def build_add_query(table_ref, partition_method, partition_name, value, number):
@@ -354,7 +409,7 @@ def build_maintenance_query(table_ref, action, partitions):
     return 'ALTER TABLE %s %s PARTITION %s' % (table_ref, action.upper(), quoted)
 
 
-def validate_inputs(module, action, partition_method, partition_name, value, number, partitions, into):
+def validate_inputs(module, action, partition_method, names, value, number, into):
     if action == 'add':
         if partition_method in HASH_KEY_METHODS:
             if number is None:
@@ -362,40 +417,43 @@ def validate_inputs(module, action, partition_method, partition_name, value, num
             if number < 1:
                 module.fail_json(msg='number must be at least 1.')
         else:
-            if not partition_name:
-                module.fail_json(msg='partition_name is required when adding %s partitions.' % partition_method)
+            if not names:
+                module.fail_json(msg='name is required when adding %s partitions.' % partition_method)
+            if len(names) != 1:
+                module.fail_json(msg='exactly one name is required when adding %s partitions.' % partition_method)
             if value is None:
                 module.fail_json(msg='value is required when adding %s partitions.' % partition_method)
 
     elif action == 'drop':
-        if not partitions:
-            module.fail_json(msg='partitions is required for drop.')
+        if not names:
+            module.fail_json(msg='name is required for drop.')
         if partition_method in HASH_KEY_METHODS:
             module.fail_json(
                 msg='DROP PARTITION is not supported for %s partitions.' % partition_method)
 
     elif action == 'reorganize':
-        if not partitions:
-            module.fail_json(msg='partitions is required for reorganize (source partitions).')
+        if not names:
+            module.fail_json(msg='name is required for reorganize (source partitions).')
         if not into:
             module.fail_json(msg='into is required for reorganize (target partition definitions).')
         if partition_method in HASH_KEY_METHODS:
             module.fail_json(
                 msg='REORGANIZE PARTITION with value definitions is not supported for %s partitions.' % partition_method)
 
-    elif action in ('truncate',) or action in MAINTENANCE_ACTIONS:
-        if not partitions:
-            module.fail_json(msg='partitions is required for %s.' % action)
+    elif action == 'truncate' or action in MAINTENANCE_ACTIONS:
+        if not names:
+            module.fail_json(msg='name is required for %s.' % action)
 
 
 def handle_add(module, cursor, table_ref, schema, table, partition_method, current_partitions):
-    partition_name = module.params['partition_name']
+    names = module.params['name'] or []
     value = module.params['value']
     number = module.params['number']
 
     if partition_method in HASH_KEY_METHODS:
         query = build_add_query(table_ref, partition_method, None, None, number)
     else:
+        partition_name = names[0]
         if partition_exists(current_partitions, partition_name):
             module.exit_json(
                 changed=False, queries=[],
@@ -420,7 +478,7 @@ def handle_add(module, cursor, table_ref, schema, table, partition_method, curre
 
 
 def handle_drop(module, cursor, table_ref, schema, table, current_partitions):
-    partitions = module.params['partitions']
+    partitions = module.params['name']
 
     existing = [p for p in partitions if partition_exists(current_partitions, p)]
     if not existing:
@@ -447,8 +505,20 @@ def handle_drop(module, cursor, table_ref, schema, table, current_partitions):
 
 
 def handle_reorganize(module, cursor, table_ref, partition_method, current_partitions):
-    partitions = module.params['partitions']
+    partitions = module.params['name']
     into = module.params['into']
+
+    if reorganize_matches_current_state(current_partitions, partitions, into):
+        module.exit_json(
+            changed=False, queries=[],
+            partition_info=current_partitions,
+            msg='Partitions already match requested layout.')
+
+    missing = [partition for partition in partitions if not partition_exists(current_partitions, partition)]
+    if missing:
+        module.fail_json(
+            msg='Source partitions do not exist: %s.' % ', '.join(missing),
+            partition_info=current_partitions)
 
     query = build_reorganize_query(table_ref, partition_method, partitions, into)
     queries = [query]
@@ -468,7 +538,7 @@ def handle_reorganize(module, cursor, table_ref, partition_method, current_parti
 
 
 def handle_truncate(module, cursor, table_ref, current_partitions):
-    partitions = module.params['partitions']
+    partitions = module.params['name']
 
     query = build_truncate_query(table_ref, partitions)
     queries = [query]
@@ -488,7 +558,7 @@ def handle_truncate(module, cursor, table_ref, current_partitions):
 
 
 def handle_maintenance(module, cursor, table_ref, action, current_partitions):
-    partitions = module.params['partitions']
+    partitions = module.params['name']
 
     query = build_maintenance_query(table_ref, action, partitions)
     queries = [query]
@@ -516,10 +586,9 @@ def main():
             'add', 'drop', 'reorganize', 'truncate',
             'check', 'repair', 'analyze', 'optimize',
         ]),
-        partition_name=dict(type='str'),
+        name=dict(type='list', elements='str'),
         value=dict(type='str'),
         number=dict(type='int'),
-        partitions=dict(type='list', elements='str'),
         into=dict(type='list', elements='dict', options=dict(
             name=dict(type='str', required=True),
             value=dict(type='str', required=True),
@@ -538,9 +607,9 @@ def main():
     table = module.params['table']
     schema = module.params['schema']
 
-    check_input(module, table, schema, module.params['partition_name'], module.params['value'])
-    if module.params['partitions']:
-        check_input(module, module.params['partitions'])
+    check_input(module, table, schema, module.params['value'])
+    if module.params['name']:
+        check_input(module, module.params['name'])
     if module.params['into']:
         for item in module.params['into']:
             check_input(module, item['name'], item['value'])
@@ -579,9 +648,8 @@ def main():
 
     validate_inputs(
         module, action, partition_method,
-        module.params['partition_name'], module.params['value'],
-        module.params['number'], module.params['partitions'],
-        module.params['into'])
+        module.params['name'], module.params['value'],
+        module.params['number'], module.params['into'])
 
     if action == 'add':
         queries = handle_add(module, cursor, table_ref, schema, table, partition_method, current_partitions)

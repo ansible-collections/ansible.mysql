@@ -6,6 +6,7 @@ __metaclass__ = type
 import pytest
 
 from ansible_collections.ansible.mysql.plugins.modules.mysql_partition import (
+    PARTITION_QUERY,
     build_add_query,
     build_drop_query,
     build_maintenance_query,
@@ -177,6 +178,10 @@ def test_get_partition_info_returns_empty_for_non_partitioned():
     result = get_partition_info(cursor, 'mydb', 'plain')
 
     assert result == []
+
+
+def test_partition_query_excludes_subpartitions():
+    assert 'SUBPARTITION_NAME IS NULL' in PARTITION_QUERY
 
 
 # ── partition_exists ──────────────────────────────────────────────
@@ -409,92 +414,99 @@ def test_build_maintenance_query_multiple_partitions():
 # ── validate_inputs ───────────────────────────────────────────────
 
 
-def test_validate_inputs_add_range_missing_partition_name():
+def test_validate_inputs_add_range_missing_name():
     module = DummyModule()
 
-    with pytest.raises(RuntimeError, match='partition_name is required'):
-        validate_inputs(module, 'add', 'RANGE', None, '2024', None, None, None)
+    with pytest.raises(RuntimeError, match='name is required'):
+        validate_inputs(module, 'add', 'RANGE', None, '2024', None, None)
+
+
+def test_validate_inputs_add_range_requires_single_name():
+    module = DummyModule()
+
+    with pytest.raises(RuntimeError, match='exactly one name is required'):
+        validate_inputs(module, 'add', 'RANGE', ['p2023', 'p2024'], '2024', None, None)
 
 
 def test_validate_inputs_add_range_missing_value():
     module = DummyModule()
 
     with pytest.raises(RuntimeError, match='value is required'):
-        validate_inputs(module, 'add', 'RANGE', 'p2023', None, None, None, None)
+        validate_inputs(module, 'add', 'RANGE', ['p2023'], None, None, None)
 
 
 def test_validate_inputs_add_hash_missing_number():
     module = DummyModule()
 
     with pytest.raises(RuntimeError, match='number is required'):
-        validate_inputs(module, 'add', 'HASH', None, None, None, None, None)
+        validate_inputs(module, 'add', 'HASH', None, None, None, None)
 
 
 def test_validate_inputs_add_hash_number_zero():
     module = DummyModule()
 
     with pytest.raises(RuntimeError, match='number must be at least 1'):
-        validate_inputs(module, 'add', 'HASH', None, None, 0, None, None)
+        validate_inputs(module, 'add', 'HASH', None, None, 0, None)
 
 
 def test_validate_inputs_add_linear_key_missing_number():
     module = DummyModule()
 
     with pytest.raises(RuntimeError, match='number is required'):
-        validate_inputs(module, 'add', 'LINEAR KEY', None, None, None, None, None)
+        validate_inputs(module, 'add', 'LINEAR KEY', None, None, None, None)
 
 
 def test_validate_inputs_add_range_valid():
     module = DummyModule()
 
-    validate_inputs(module, 'add', 'RANGE', 'p2023', '2024', None, None, None)
+    validate_inputs(module, 'add', 'RANGE', ['p2023'], '2024', None, None)
 
 
 def test_validate_inputs_add_hash_valid():
     module = DummyModule()
 
-    validate_inputs(module, 'add', 'HASH', None, None, 4, None, None)
+    validate_inputs(module, 'add', 'HASH', None, None, 4, None)
 
 
-def test_validate_inputs_drop_missing_partitions():
+def test_validate_inputs_drop_missing_name():
     module = DummyModule()
 
-    with pytest.raises(RuntimeError, match='partitions is required for drop'):
-        validate_inputs(module, 'drop', 'RANGE', None, None, None, None, None)
+    with pytest.raises(RuntimeError, match='name is required for drop'):
+        validate_inputs(module, 'drop', 'RANGE', None, None, None, None)
 
 
 def test_validate_inputs_drop_hash_rejected():
     module = DummyModule()
 
     with pytest.raises(RuntimeError, match='not supported for HASH'):
-        validate_inputs(module, 'drop', 'HASH', None, None, None, ['p0'], None)
+        validate_inputs(module, 'drop', 'HASH', ['p0'], None, None, None)
 
 
 def test_validate_inputs_drop_linear_hash_rejected():
     module = DummyModule()
 
     with pytest.raises(RuntimeError, match='not supported for LINEAR HASH'):
-        validate_inputs(module, 'drop', 'LINEAR HASH', None, None, None, ['p0'], None)
+        validate_inputs(module, 'drop', 'LINEAR HASH', ['p0'], None, None, None)
 
 
 def test_validate_inputs_drop_key_rejected():
     module = DummyModule()
 
     with pytest.raises(RuntimeError, match='not supported for KEY'):
-        validate_inputs(module, 'drop', 'KEY', None, None, None, ['p0'], None)
+        validate_inputs(module, 'drop', 'KEY', ['p0'], None, None, None)
 
 
 def test_validate_inputs_drop_range_valid():
     module = DummyModule()
 
-    validate_inputs(module, 'drop', 'RANGE', None, None, None, ['p2020'], None)
+    validate_inputs(module, 'drop', 'RANGE', ['p2020'], None, None, None)
 
 
-def test_validate_inputs_reorganize_missing_partitions():
+def test_validate_inputs_reorganize_missing_name():
     module = DummyModule()
 
-    with pytest.raises(RuntimeError, match='partitions is required for reorganize'):
-        validate_inputs(module, 'reorganize', 'RANGE', None, None, None, None,
+    with pytest.raises(RuntimeError, match='name is required for reorganize'):
+        validate_inputs(module, 'reorganize', 'RANGE', None, None, None,
                         [{'name': 'px', 'value': '1'}])
 
 
@@ -502,37 +514,37 @@ def test_validate_inputs_reorganize_missing_into():
     module = DummyModule()
 
     with pytest.raises(RuntimeError, match='into is required for reorganize'):
-        validate_inputs(module, 'reorganize', 'RANGE', None, None, None, ['p0'], None)
+        validate_inputs(module, 'reorganize', 'RANGE', ['p0'], None, None, None)
 
 
 def test_validate_inputs_reorganize_hash_rejected():
     module = DummyModule()
 
     with pytest.raises(RuntimeError, match='not supported for HASH'):
-        validate_inputs(module, 'reorganize', 'HASH', None, None, None,
-                        ['p0'], [{'name': 'px', 'value': '1'}])
+        validate_inputs(module, 'reorganize', 'HASH', ['p0'], None, None,
+                        [{'name': 'px', 'value': '1'}])
 
 
 def test_validate_inputs_reorganize_valid():
     module = DummyModule()
 
-    validate_inputs(module, 'reorganize', 'LIST', None, None, None,
-                    ['p_old'], [{'name': 'px', 'value': '1, 2'}])
+    validate_inputs(module, 'reorganize', 'LIST', ['p_old'], None, None,
+                    [{'name': 'px', 'value': '1, 2'}])
 
 
 @pytest.mark.parametrize('action', ['truncate', 'check', 'repair', 'analyze', 'optimize'])
-def test_validate_inputs_maintenance_missing_partitions(action):
+def test_validate_inputs_maintenance_missing_name(action):
     module = DummyModule()
 
-    with pytest.raises(RuntimeError, match='partitions is required for %s' % action):
-        validate_inputs(module, action, 'RANGE', None, None, None, None, None)
+    with pytest.raises(RuntimeError, match='name is required for %s' % action):
+        validate_inputs(module, action, 'RANGE', None, None, None, None)
 
 
 @pytest.mark.parametrize('action', ['truncate', 'check', 'repair', 'analyze', 'optimize'])
 def test_validate_inputs_maintenance_valid(action):
     module = DummyModule()
 
-    validate_inputs(module, action, 'RANGE', None, None, None, ['p0'], None)
+    validate_inputs(module, action, 'RANGE', ['p0'], None, None, None)
 
 
 # ── handle_add ────────────────────────────────────────────────────
@@ -540,7 +552,7 @@ def test_validate_inputs_maintenance_valid(action):
 
 def test_handle_add_range_existing_partition_is_idempotent():
     module = DummyModule(params={
-        'partition_name': 'p2020', 'value': '2021', 'number': None,
+        'name': ['p2020'], 'value': '2021', 'number': None,
     })
     cursor = DummyCursor()
 
@@ -554,7 +566,7 @@ def test_handle_add_range_existing_partition_is_idempotent():
 
 def test_handle_add_range_new_partition():
     module = DummyModule(params={
-        'partition_name': 'p2023', 'value': '2024', 'number': None,
+        'name': ['p2023'], 'value': '2024', 'number': None,
     })
     cursor = DummyCursor()
 
@@ -568,7 +580,7 @@ def test_handle_add_range_new_partition():
 
 def test_handle_add_range_check_mode():
     module = DummyModule(params={
-        'partition_name': 'p2023', 'value': '2024', 'number': None,
+        'name': ['p2023'], 'value': '2024', 'number': None,
     })
     module.check_mode = True
     cursor = DummyCursor()
@@ -584,7 +596,7 @@ def test_handle_add_range_check_mode():
 
 def test_handle_add_hash():
     module = DummyModule(params={
-        'partition_name': None, 'value': None, 'number': 2,
+        'name': None, 'value': None, 'number': 2,
     })
     cursor = DummyCursor()
 
@@ -595,7 +607,7 @@ def test_handle_add_hash():
 
 def test_handle_add_execute_error():
     module = DummyModule(params={
-        'partition_name': 'p2023', 'value': '2024', 'number': None,
+        'name': ['p2023'], 'value': '2024', 'number': None,
     })
     cursor = FailingCursor('Duplicate partition name')
 
@@ -607,7 +619,7 @@ def test_handle_add_execute_error():
 
 
 def test_handle_drop_no_matching_partitions():
-    module = DummyModule(params={'partitions': ['p9999']})
+    module = DummyModule(params={'name': ['p9999']})
     cursor = DummyCursor()
 
     with pytest.raises(SystemExit) as exc:
@@ -619,7 +631,7 @@ def test_handle_drop_no_matching_partitions():
 
 
 def test_handle_drop_filters_to_existing():
-    module = DummyModule(params={'partitions': ['p2020', 'p9999']})
+    module = DummyModule(params={'name': ['p2020', 'p9999']})
     cursor = DummyCursor()
 
     queries = handle_drop(module, cursor, '`db`.`t`', 'db', 't', SAMPLE_RANGE_PARTITIONS)
@@ -630,7 +642,7 @@ def test_handle_drop_filters_to_existing():
 
 
 def test_handle_drop_check_mode():
-    module = DummyModule(params={'partitions': ['p2020']})
+    module = DummyModule(params={'name': ['p2020']})
     module.check_mode = True
     cursor = DummyCursor()
 
@@ -644,7 +656,7 @@ def test_handle_drop_check_mode():
 
 
 def test_handle_drop_executes():
-    module = DummyModule(params={'partitions': ['p2020']})
+    module = DummyModule(params={'name': ['p2020']})
     cursor = DummyCursor()
 
     queries = handle_drop(module, cursor, '`db`.`t`', 'db', 't', SAMPLE_RANGE_PARTITIONS)
@@ -654,7 +666,7 @@ def test_handle_drop_executes():
 
 
 def test_handle_drop_execute_error():
-    module = DummyModule(params={'partitions': ['p2020']})
+    module = DummyModule(params={'name': ['p2020']})
     cursor = FailingCursor('Cannot remove all partitions')
 
     with pytest.raises(RuntimeError, match='Failed to drop partition'):
@@ -666,7 +678,7 @@ def test_handle_drop_execute_error():
 
 def test_handle_reorganize_executes():
     module = DummyModule(params={
-        'partitions': ['p2020', 'p2021'],
+        'name': ['p2020', 'p2021'],
         'into': [{'name': 'p_merged', 'value': '2022'}],
     })
     cursor = DummyCursor()
@@ -681,7 +693,7 @@ def test_handle_reorganize_executes():
 
 def test_handle_reorganize_check_mode():
     module = DummyModule(params={
-        'partitions': ['p2020'],
+        'name': ['p2020'],
         'into': [{'name': 'pa', 'value': '2020'}, {'name': 'pb', 'value': '2021'}],
     })
     module.check_mode = True
@@ -698,7 +710,7 @@ def test_handle_reorganize_check_mode():
 
 def test_handle_reorganize_execute_error():
     module = DummyModule(params={
-        'partitions': ['p2020'],
+        'name': ['p2020'],
         'into': [{'name': 'px', 'value': '2021'}],
     })
     cursor = FailingCursor('VALUES LESS THAN value must be strictly increasing')
@@ -707,11 +719,42 @@ def test_handle_reorganize_execute_error():
         handle_reorganize(module, cursor, '`t`', 'RANGE', SAMPLE_RANGE_PARTITIONS)
 
 
+def test_handle_reorganize_missing_source_partition():
+    module = DummyModule(params={
+        'name': ['p9999'],
+        'into': [{'name': 'px', 'value': '2021'}],
+    })
+    cursor = DummyCursor()
+
+    with pytest.raises(RuntimeError, match='Source partitions do not exist'):
+        handle_reorganize(module, cursor, '`t`', 'RANGE', SAMPLE_RANGE_PARTITIONS)
+
+
+def test_handle_reorganize_idempotent_when_target_layout_matches():
+    module = DummyModule(params={
+        'name': ['p2020', 'p2021'],
+        'into': [{'name': 'p_merged', 'value': '2022'}],
+    })
+    cursor = DummyCursor()
+    current_partitions = [
+        {'PARTITION_NAME': 'p_merged', 'PARTITION_METHOD': 'RANGE',
+         'PARTITION_EXPRESSION': 'year', 'PARTITION_DESCRIPTION': '2022',
+         'PARTITION_ORDINAL_POSITION': 1, 'TABLE_ROWS': 30},
+    ]
+
+    with pytest.raises(SystemExit) as exc:
+        handle_reorganize(module, cursor, '`t`', 'RANGE', current_partitions)
+
+    result = exc.value.args[0]
+    assert result['changed'] is False
+    assert 'already match requested layout' in result['msg']
+
+
 # ── handle_truncate ───────────────────────────────────────────────
 
 
 def test_handle_truncate_executes():
-    module = DummyModule(params={'partitions': ['p2020']})
+    module = DummyModule(params={'name': ['p2020']})
     cursor = DummyCursor()
 
     queries = handle_truncate(module, cursor, '`db`.`t`', SAMPLE_RANGE_PARTITIONS)
@@ -721,7 +764,7 @@ def test_handle_truncate_executes():
 
 
 def test_handle_truncate_all():
-    module = DummyModule(params={'partitions': ['ALL']})
+    module = DummyModule(params={'name': ['ALL']})
     cursor = DummyCursor()
 
     queries = handle_truncate(module, cursor, '`t`', SAMPLE_RANGE_PARTITIONS)
@@ -730,7 +773,7 @@ def test_handle_truncate_all():
 
 
 def test_handle_truncate_check_mode():
-    module = DummyModule(params={'partitions': ['p2020']})
+    module = DummyModule(params={'name': ['p2020']})
     module.check_mode = True
     cursor = DummyCursor()
 
@@ -744,7 +787,7 @@ def test_handle_truncate_check_mode():
 
 
 def test_handle_truncate_execute_error():
-    module = DummyModule(params={'partitions': ['p2020']})
+    module = DummyModule(params={'name': ['p2020']})
     cursor = FailingCursor('Unknown partition')
 
     with pytest.raises(RuntimeError, match='Failed to truncate'):
@@ -756,7 +799,7 @@ def test_handle_truncate_execute_error():
 
 @pytest.mark.parametrize('action', ['check', 'repair', 'analyze', 'optimize'])
 def test_handle_maintenance_executes(action):
-    module = DummyModule(params={'partitions': ['p2020']})
+    module = DummyModule(params={'name': ['p2020']})
     cursor = DummyCursor()
 
     queries = handle_maintenance(module, cursor, '`db`.`t`', action, SAMPLE_RANGE_PARTITIONS)
@@ -767,7 +810,7 @@ def test_handle_maintenance_executes(action):
 
 @pytest.mark.parametrize('action', ['check', 'repair', 'analyze', 'optimize'])
 def test_handle_maintenance_check_mode(action):
-    module = DummyModule(params={'partitions': ['p2020']})
+    module = DummyModule(params={'name': ['p2020']})
     module.check_mode = True
     cursor = DummyCursor()
 
@@ -781,7 +824,7 @@ def test_handle_maintenance_check_mode(action):
 
 
 def test_handle_maintenance_execute_error():
-    module = DummyModule(params={'partitions': ['p2020']})
+    module = DummyModule(params={'name': ['p2020']})
     cursor = FailingCursor('Table not found')
 
     with pytest.raises(RuntimeError, match='Failed to check partition'):
@@ -789,7 +832,7 @@ def test_handle_maintenance_execute_error():
 
 
 def test_handle_maintenance_all():
-    module = DummyModule(params={'partitions': ['ALL']})
+    module = DummyModule(params={'name': ['ALL']})
     cursor = DummyCursor()
 
     queries = handle_maintenance(module, cursor, '`t`', 'analyze', SAMPLE_RANGE_PARTITIONS)
@@ -804,6 +847,7 @@ def _make_main_module(action='check', table='events', schema='mydb', **overrides
     params = {
         'login_user': 'root',
         'login_password': 'secret',
+        'login_db': None,
         'config_file': '~/.my.cnf',
         'client_cert': None,
         'client_key': None,
@@ -813,10 +857,9 @@ def _make_main_module(action='check', table='events', schema='mydb', **overrides
         'table': table,
         'schema': schema,
         'action': action,
-        'partition_name': None,
+        'name': ['p2020'],
         'value': None,
         'number': None,
-        'partitions': ['p2020'],
         'into': None,
     }
     params.update(overrides)
@@ -887,8 +930,7 @@ def test_main_fails_for_non_partitioned_table(monkeypatch):
 
 def test_main_check_mode_add(monkeypatch):
     module = _make_main_module(
-        action='add', partition_name='p2023', value='2024',
-        partitions=None,
+        action='add', name=['p2023'], value='2024',
     )
     module.check_mode = True
     cursor = DummyCursor()
@@ -903,7 +945,7 @@ def test_main_check_mode_add(monkeypatch):
 
 
 def test_main_successful_drop(monkeypatch):
-    module = _make_main_module(action='drop', partitions=['p2020'])
+    module = _make_main_module(action='drop', name=['p2020'])
     cursor = DummyCursor()
     _patch_main(monkeypatch, module, cursor)
 
@@ -916,7 +958,7 @@ def test_main_successful_drop(monkeypatch):
 
 
 def test_main_successful_truncate(monkeypatch):
-    module = _make_main_module(action='truncate', partitions=['ALL'])
+    module = _make_main_module(action='truncate', name=['ALL'])
     cursor = DummyCursor()
     _patch_main(monkeypatch, module, cursor)
 
@@ -930,7 +972,7 @@ def test_main_successful_truncate(monkeypatch):
 def test_main_successful_reorganize(monkeypatch):
     module = _make_main_module(
         action='reorganize',
-        partitions=['p2020', 'p2021'],
+        name=['p2020', 'p2021'],
         into=[{'name': 'p_merged', 'value': '2022'}],
     )
     cursor = DummyCursor()
@@ -945,7 +987,7 @@ def test_main_successful_reorganize(monkeypatch):
 
 @pytest.mark.parametrize('action', ['check', 'repair', 'analyze', 'optimize'])
 def test_main_successful_maintenance(monkeypatch, action):
-    module = _make_main_module(action=action, partitions=['p2020'])
+    module = _make_main_module(action=action, name=['p2020'])
     cursor = DummyCursor()
     _patch_main(monkeypatch, module, cursor)
 
@@ -958,7 +1000,7 @@ def test_main_successful_maintenance(monkeypatch, action):
 
 
 def test_main_resolves_schema_from_connection(monkeypatch):
-    module = _make_main_module(action='check', schema=None, partitions=['p2020'])
+    module = _make_main_module(action='check', schema=None, name=['p2020'])
     cursor = DummyCursor()
     _patch_main(monkeypatch, module, cursor)
 
@@ -976,8 +1018,7 @@ def test_main_resolves_schema_from_connection(monkeypatch):
 
 def test_main_add_idempotent_existing_partition(monkeypatch):
     module = _make_main_module(
-        action='add', partition_name='p2020', value='2021',
-        partitions=None,
+        action='add', name=['p2020'], value='2021',
     )
     cursor = DummyCursor()
     _patch_main(monkeypatch, module, cursor)
@@ -991,7 +1032,7 @@ def test_main_add_idempotent_existing_partition(monkeypatch):
 
 
 def test_main_drop_idempotent_missing_partition(monkeypatch):
-    module = _make_main_module(action='drop', partitions=['p9999'])
+    module = _make_main_module(action='drop', name=['p9999'])
     cursor = DummyCursor()
     _patch_main(monkeypatch, module, cursor)
 
