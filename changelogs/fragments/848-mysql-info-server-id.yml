@@ -1,0 +1,2 @@
+bugfixes:
+  - mysql_info - handled the server ID column spelling returned by MySQL's ``SHOW REPLICAS`` statement (https://github.com/ansible-collections/ansible.mysql/issues/848).

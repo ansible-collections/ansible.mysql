@@ -556,12 +556,13 @@ class MySQL_Info(object):
         res = self.__exec_sql(query)
         if res:
             for line in res:
-                srv_id = line['Server_id']
+                server_id_key = 'Server_Id' if 'Server_Id' in line else 'Server_id'
+                srv_id = line[server_id_key]
                 if srv_id not in self.info['slave_hosts']:
                     self.info['slave_hosts'][srv_id] = {}
 
                 for vname, val in line.items():
-                    if vname != 'Server_id':
+                    if vname != server_id_key:
                         self.info['slave_hosts'][srv_id][vname] = self.__convert(val)
 
     def __get_users(self):

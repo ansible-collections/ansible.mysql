@@ -35,3 +35,29 @@ def test_get_info_suffix(suffix, cursor_output, server_implementation, server_ve
     info = MySQL_Info(MagicMock(), cursor, server_implementation, server_version, user_implementation)
 
     assert info.get_info([], [], False)['version']['suffix'] == suffix
+
+
+@pytest.mark.parametrize('server_id_column', ['Server_id', 'Server_Id'])
+def test_get_info_slave_hosts_server_id_column(server_id_column):
+    cursor = MagicMock()
+    cursor.fetchall.return_value = [
+        {
+            server_id_column: 2,
+            'Host': 'replica1',
+            'Port': 3306,
+            'Source_Id': 1,
+        },
+    ]
+
+    info = MySQL_Info(MagicMock(), cursor, 'mysql', '8.4.9', 'mysql')
+
+    assert info.get_info(['slave_hosts'], [], False) == {
+        'slave_hosts': {
+            2: {
+                'Host': 'replica1',
+                'Port': 3306,
+                'Source_Id': 1,
+            },
+        },
+    }
+    cursor.execute.assert_called_once_with('SHOW REPLICAS')
