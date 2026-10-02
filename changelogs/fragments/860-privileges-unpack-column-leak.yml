@@ -1,0 +1,2 @@
+bugfixes:
+  - mysql_user, mysql_role - column-level privileges no longer add their privilege type to an earlier table-level entry in ``priv``, which granted unrequested privileges such as ``SELECT ON *.*`` (https://github.com/ansible-collections/ansible.mysql/issues/860).

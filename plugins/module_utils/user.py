@@ -850,7 +850,6 @@ def privileges_unpack(priv, mode, column_case_sensitive, ensure_usage=True):
     else:
         quote = '`'
     output = {}
-    privs = []
     for item in priv.strip().split('/'):
         pieces = item.strip().rsplit(':', 1)
         dbpriv = pieces[0].rsplit(".", 1)
@@ -872,15 +871,10 @@ def privileges_unpack(priv, mode, column_case_sensitive, ensure_usage=True):
         if '(' in pieces[1]:
             if column_case_sensitive is True:
                 output[pieces[0]] = re.split(r',\s*(?=[^)]*(?:\(|$))', pieces[1])
-                for i in output[pieces[0]]:
-                    privs.append(re.sub(r'\s*\(.*\)', '', i))
             else:
                 output[pieces[0]] = re.split(r',\s*(?=[^)]*(?:\(|$))', pieces[1].upper())
-                for i in output[pieces[0]]:
-                    privs.append(re.sub(r'\s*\(.*\)', '', i))
         else:
             output[pieces[0]] = pieces[1].upper().split(',')
-            privs = output[pieces[0]]
 
         # Handle cases when there's privs like GRANT SELECT (colA, ...) in privs.
         output[pieces[0]] = normalize_col_grants(output[pieces[0]])
