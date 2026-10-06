@@ -112,6 +112,12 @@
     check_implicit_admin: no
   register: result
 
+- name: Dump and Import | Assert password is masked in dump command
+  assert:
+    that:
+      - result.executed_commands[0] is search("--password=\*\*\*\*\*\*\*\*")
+      - db_user_unsafe_password not in result.executed_commands[0]
+
 - name: Dump and Import | Assert successful completion of dump operation for MariaDB and MySQL < 8.2
   assert:
     that:
@@ -245,6 +251,12 @@
     use_shell: yes
   register: result
 
+- name: Dump and Import | Assert password is masked in import command
+  assert:
+    that:
+      - result.executed_commands[-1] is search("--password=\*\*\*\*\*\*\*\*")
+      - db_user_unsafe_password not in result.executed_commands[-1]
+
 - name: Dump and Import | Show the tables
   command: "{{ mysql_command }} {{ db_name }} \"-e show tables\""
   register: result
@@ -270,6 +282,12 @@
   assert:
     that:
       - import_result is changed
+
+- name: Dump and Import | Assert password is masked in import command from dump file1
+  assert:
+    that:
+      - import_result.executed_commands[-1] is search("--password=\*\*\*\*\*\*\*\*")
+      - mysql_password not in import_result.executed_commands[-1]
 
 - name: Dump and Import | Remove database
   mysql_db:

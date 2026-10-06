@@ -320,6 +320,8 @@ from ansible.module_utils.common.text.converters import to_native
 
 executed_queries = []
 
+PASSWORD_MASK = '********'
+
 
 def get_primary_status(cursor, command_resolver):
     query = command_resolver.resolve_command("SHOW MASTER STATUS")
@@ -446,7 +448,7 @@ def start_replica(module, cursor, connection_name='', channel='', fail_on_error=
     return started
 
 
-def changeprimary(cursor, command_resolver, chm, connection_name='', channel=''):
+def changeprimary(cursor, command_resolver, chm, connection_name='', channel='', primary_password=None):
     query_head = command_resolver.resolve_command("CHANGE MASTER")
     if connection_name:
         query = "%s '%s' TO %s" % (query_head, connection_name, ','.join(chm))
@@ -456,18 +458,18 @@ def changeprimary(cursor, command_resolver, chm, connection_name='', channel='')
     if channel:
         query += " FOR CHANNEL '%s'" % channel
 
-    executed_queries.append(query)
     cursor.execute(query)
+    executed_queries.append(query.replace(primary_password, PASSWORD_MASK) if primary_password else query)
 
 
-def changereplication(cursor, chm, channel=''):
+def changereplication(cursor, chm, channel='', primary_password=None):
     query = 'CHANGE REPLICATION SOURCE TO %s' % ','.join(chm)
 
     if channel:
         query += " FOR CHANNEL '%s'" % channel
 
-    executed_queries.append(query)
     cursor.execute(query)
+    executed_queries.append(query.replace(primary_password, PASSWORD_MASK) if primary_password else query)
 
 
 def main():
@@ -657,7 +659,7 @@ def main():
         if primary_use_gtid is not None:
             chm.append("MASTER_USE_GTID=%s" % primary_use_gtid)  # MariaDB only
         try:
-            changeprimary(cursor, command_resolver, chm, connection_name, channel)
+            changeprimary(cursor, command_resolver, chm, connection_name, channel, primary_password)
         except mysql_driver.Warning as e:
             result['warning'] = to_native(e)
         except Exception as e:
@@ -740,7 +742,7 @@ def main():
         if primary_auto_position:
             chm.append("SOURCE_AUTO_POSITION=1")
         try:
-            changereplication(cursor, chm, channel)
+            changereplication(cursor, chm, channel, primary_password)
         except mysql_driver.Warning as e:
             result['warning'] = to_native(e)
         except Exception as e:

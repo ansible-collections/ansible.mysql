@@ -204,6 +204,11 @@
           '{{ mysql_primary_status.File }}',SOURCE_LOG_POS=\
           {{ mysql_primary_status.Position }},SOURCE_SSL=0,SOURCE_SSL_CA=''"]
 
+    - name: Assert that raw password is not in queries
+      ansible.builtin.assert:
+        that:
+          - replication_pass not in result.queries[0]
+
     # Test startreplica mode:
     - name: Start replica
       mysql_replication:
