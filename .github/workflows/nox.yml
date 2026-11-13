@@ -63,6 +63,7 @@ jobs:
         uses: ansible-community/antsibull-nox@stable-1
         with:
           sessions: ansible-test-sanity-${{ matrix.ansible }}
+          extra-python-versions: "3.13"
 
   unit:
     name: Unit - ${{ matrix.ansible }}
@@ -89,3 +90,4 @@ jobs:
         uses: ansible-community/antsibull-nox@stable-1
         with:
           sessions: ansible-test-units-${{ matrix.ansible }}
+          extra-python-versions: "3.13"
