@@ -186,7 +186,7 @@ jobs:
         with:
           ansible-core-version: ${{ matrix.ansible }}
           docker-image: >-
-            ${{ matrix.ansible == 'devel' && 'ubuntu2604' || 'ubuntu2204' }}
+            ${{ matrix.ansible == 'devel' && 'ubuntu2604' || 'ubuntu2404' }}
           pre-test-cmd: >-
             echo Setting db_engine_name to "${{ matrix.db_engine_name }}"...;
             echo -n "${{ matrix.db_engine_name }}"
