@@ -47,11 +47,11 @@ jobs:
     strategy:
       matrix:
         ansible:
-        - "2.17"
         - "2.18"
         - "2.19"
         - "2.20"
         - "2.21"
+        - "2.22"
         - "devel"
     steps:
       - name: Check out collection
@@ -63,6 +63,7 @@ jobs:
         uses: ansible-community/antsibull-nox@stable-1
         with:
           sessions: ansible-test-sanity-${{ matrix.ansible }}
+          extra-python-versions: "3.13"
 
   unit:
     name: Unit - ${{ matrix.ansible }}
@@ -73,11 +74,11 @@ jobs:
       fail-fast: true
       matrix:
         ansible:
-          - "2.17"
           - "2.18"
           - "2.19"
           - "2.20"
           - "2.21"
+          - "2.22"
           - "devel"
     steps:
       - name: Check out collection
@@ -89,3 +90,4 @@ jobs:
         uses: ansible-community/antsibull-nox@stable-1
         with:
           sessions: ansible-test-units-${{ matrix.ansible }}
+          extra-python-versions: "3.13"
