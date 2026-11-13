@@ -111,3 +111,23 @@ def test_normalize_col_grants(input_, expected):
 def test_privileges_unpack(priv, mode, column_case_sensitive, ensure_usage, expected):
     """Tests privileges_unpack function."""
     assert privileges_unpack(priv, mode, column_case_sensitive, ensure_usage) == expected
+
+
+@pytest.mark.parametrize(
+    'priv,expected',
+    [
+        # column-level after table-level must not leak onto the table
+        ('db.tbl:INSERT/db.other:UPDATE(`col`)',
+         {'`db`.`tbl`': ['INSERT'], '`db`.`other`': ['UPDATE(`col`)'], '*.*': ['USAGE']}),
+        # leak onto *.* (the severe case)
+        ('*.*:PROCESS,REPLICATION CLIENT/db.t:SELECT(`a`)',
+         {'*.*': ['PROCESS', 'REPLICATION CLIENT'], '`db`.`t`': ['SELECT(`a`)']}),
+        # multiple column grants after one table grant
+        ('db.a:SELECT/db.b:UPDATE(`x`)/db.c:INSERT(`y`)',
+         {'`db`.`a`': ['SELECT'], '`db`.`b`': ['UPDATE(`x`)'],
+          '`db`.`c`': ['INSERT(`y`)'], '*.*': ['USAGE']}),
+    ]
+)
+def test_privileges_unpack_column_grant_does_not_leak(priv, expected):
+    """Column-level grants must not add privileges to earlier table-level entries."""
+    assert privileges_unpack(priv, 'NONE', True) == expected
