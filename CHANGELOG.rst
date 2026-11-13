@@ -6,6 +6,22 @@ Community MySQL and MariaDB Collection Release Notes
 
 This changelog describes changes after version 2.0.0.
 
+v5.2.1
+======
+
+Release Summary
+---------------
+
+This is a patch release of the ``ansible.mysql`` collection.
+This changelog contains all changes that have been made to this collection after the previous release.
+
+Bugfixes
+--------
+
+- mysql_db, mysql_replication - mask passwords in return values (``executed_commands`` and ``queries``) instead of relying on Ansible's ``no_log`` masking (https://github.com/ansible-collections/ansible.mariadb/pull/31).
+- mysql_info - handled the server ID column spelling returned by MySQL's ``SHOW REPLICAS`` statement (https://github.com/ansible-collections/ansible.mysql/issues/848).
+- mysql_user, mysql_role - column-level privileges no longer add their privilege type to an earlier table-level entry in ``priv``, which granted unrequested privileges such as ``SELECT ON *.*`` (https://github.com/ansible-collections/ansible.mysql/issues/860).
+
 v5.2.0
 ======
 
