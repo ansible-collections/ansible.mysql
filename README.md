@@ -94,15 +94,15 @@ Every voice is important and every idea is valuable. If you have something on yo
 
 ## Releases Support Timeline
 
-We maintain each major release (1.x.y, 2.x.y, ...) for two years after the next major version is released.
+We maintain one previous major release version (X.y.z) for one year after the current major version release date (bugfixes only, no new features).
 
 Here is the table for the support timeline:
 
-- 1.x.y: released 2020-08-17, EOL
-- 2.x.y: released 2021-04-15, EOL
-- 3.x.y: released 2021-12-01, EOL
-- 4.x.y: released 2025-09-15, EOL 2028-05-05
-- 5.x.y: released 2026-05-05, current
+- 1.y.z: released 2020-08-17, EOL
+- 2.y.z: released 2021-04-15, EOL
+- 3.y.z: released 2021-12-01, EOL
+- 4.y.z: released 2025-09-15, EOL
+- 5.y.z: released 2026-05-05, current
 
 ## Tested with
 
@@ -114,6 +114,7 @@ For MariaDB, only Long Term releases are tested. When multiple LTS are available
 
 - mysql 8.4.9
 - mysql 9.7.0
+- mariadb testing is kept temporarily for compatibility reasons.
 
 ### Database connectors
 
