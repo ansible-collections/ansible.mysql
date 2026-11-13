@@ -852,3 +852,23 @@ releases:
       name: mysql_tls
       namespace: ''
     release_date: '2026-07-16'
+  5.2.1:
+    changes:
+      bugfixes:
+      - mysql_db, mysql_replication - mask passwords in return values (``executed_commands``
+        and ``queries``) instead of relying on Ansible's ``no_log`` masking (https://github.com/ansible-collections/ansible.mariadb/pull/31).
+      - mysql_info - handled the server ID column spelling returned by MySQL's ``SHOW
+        REPLICAS`` statement (https://github.com/ansible-collections/ansible.mysql/issues/848).
+      - mysql_user, mysql_role - column-level privileges no longer add their privilege
+        type to an earlier table-level entry in ``priv``, which granted unrequested
+        privileges such as ``SELECT ON *.*`` (https://github.com/ansible-collections/ansible.mysql/issues/860).
+      release_summary: 'This is a patch release of the ``ansible.mysql`` collection.
+
+        This changelog contains all changes that have been made to this collection
+        after the previous release.'
+    fragments:
+    - 5.2.1.yml
+    - 848-mysql-info-server-id.yml
+    - 860-privileges-unpack-column-leak.yml
+    - mask-passwords-in-return-values.yml
+    release_date: '2026-11-13'
