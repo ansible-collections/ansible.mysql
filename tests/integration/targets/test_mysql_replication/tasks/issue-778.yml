@@ -1,0 +1,112 @@
+---
+# mysql_role force_context with a replication filter on the replica
+# https://github.com/ansible-collections/ansible.mysql/issues/778
+
+- vars:
+    mysql_parameters: &mysql_params
+      login_user: '{{ mysql_user }}'
+      login_password: '{{ mysql_password }}'
+      login_host: '{{ mysql_host }}'
+      login_port: '{{ mysql_primary_port }}'
+    replica_parameters: &replica_params
+      login_user: '{{ mysql_user }}'
+      login_password: '{{ mysql_password }}'
+      login_host: '{{ mysql_host }}'
+      login_port: '{{ mysql_replica1_port }}'
+    role_name: role_778
+    marker_db: marker_778
+  block:
+
+    - name: Issue-778 | Stop replica
+      mysql_replication:
+        <<: *replica_params
+        mode: stopreplica
+
+    - name: Issue-778 | Ignore the mysql database on the replica
+      mysql_replication_filter:
+        <<: *replica_params
+        replicate_ignore_db:
+          - mysql
+
+    - name: Issue-778 | Start replica
+      mysql_replication:
+        <<: *replica_params
+        mode: startreplica
+
+    # The role exists on the replica already, so a CREATE ROLE that is not
+    # filtered out stops the replica SQL thread.
+    - name: Issue-778 | Create the role on the replica only
+      mysql_role:
+        <<: *replica_params
+        name: '{{ role_name }}'
+        sql_log_bin: false
+
+    - name: Issue-778 | Create the role on the primary with force_context
+      mysql_role:
+        <<: *mysql_params
+        name: '{{ role_name }}'
+        force_context: true
+      register: result
+
+    - name: Issue-778 | Assert the role was created
+      assert:
+        that:
+          - result is changed
+
+    - name: Issue-778 | Create a marker database after the role
+      mysql_db:
+        <<: *mysql_params
+        name: '{{ marker_db }}'
+
+    - name: Issue-778 | Wait until the replica has applied the marker database
+      mysql_query:
+        <<: *replica_params
+        query: "SHOW DATABASES LIKE '{{ marker_db }}'"
+      register: result
+      until: result.rowcount[0] == 1
+      retries: 30
+      delay: 1
+
+    - name: Issue-778 | Get replica status
+      mysql_replication:
+        <<: *replica_params
+        mode: getreplica
+      register: replica_status
+
+    - name: Issue-778 | Assert the CREATE ROLE was filtered and replication still runs
+      assert:
+        that:
+          - replica_status.Last_SQL_Errno == 0
+          - replica_status.Last_SQL_Error == ''
+
+  always:
+
+    - name: Issue-778 | Drop the marker database
+      mysql_db:
+        <<: *mysql_params
+        name: '{{ marker_db }}'
+        state: absent
+
+    - name: Issue-778 | Drop the role on the primary
+      mysql_role:
+        <<: *mysql_params
+        name: '{{ role_name }}'
+        state: absent
+        force_context: true
+
+    - name: Issue-778 | Drop the role on the replica
+      mysql_role:
+        <<: *replica_params
+        name: '{{ role_name }}'
+        state: absent
+        sql_log_bin: false
+
+    - name: Issue-778 | Stop replica
+      mysql_replication:
+        <<: *replica_params
+        mode: stopreplica
+
+    - name: Issue-778 | Remove the replication filter
+      mysql_replication_filter:
+        <<: *replica_params
+        replicate_ignore_db: []
