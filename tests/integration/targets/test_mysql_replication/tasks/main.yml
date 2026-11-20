@@ -18,6 +18,10 @@
 - include_tasks: issue-265.yml
   when: db_version is version('9.0', '<') or db_engine == 'mariadb'
 
+# mysql_role force_context with a replication filter, same requirements as issue-265
+- include_tasks: issue-778.yml
+  when: db_version is version('9.0', '<') or db_engine == 'mariadb'
+
 # primary_ssl_verify_server_cert
 # Must run before mysql add channels in mysql_replication_channel.yml
 - import_tasks: issue-689.yml

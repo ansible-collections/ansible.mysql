@@ -141,6 +141,20 @@ options:
     default: true
     version_added: '4.1.0'
 
+  force_context:
+    description:
+      - Sets the C(mysql) system database as context for the executed statements (it will be used
+        as a database to connect to). Useful if you use binlog / replication filters in MySQL as
+        per default the statements can not be caught by a binlog / replication filter, they require
+        a database to be set to work, otherwise the replication can break down.
+      - See U(https://dev.mysql.com/doc/refman/8.0/en/replication-options-binary-log.html#option_mysqld_binlog-ignore-db)
+        for a description on how binlog filters work (filtering on the primary).
+      - See U(https://dev.mysql.com/doc/refman/8.0/en/replication-options-replica.html#option_mysqld_replicate-ignore-db)
+        for a description on how replication filters work (filtering on the replica).
+    type: bool
+    default: false
+    version_added: '5.3.0'
+
 notes:
   - Roles are supported since MySQL 8.0.0 and MariaDB 10.0.5.
   - Pay attention that the module runs C(SET DEFAULT ROLE ALL TO)
@@ -993,6 +1007,7 @@ def main():
         members_must_exist=dict(type='bool', default=True),
         column_case_sensitive=dict(type='bool', default=True),
         sql_log_bin=dict(type='bool', default=True),
+        force_context=dict(type='bool', default=False),
     )
     module = AnsibleModule(
         argument_spec=argument_spec,
@@ -1025,6 +1040,8 @@ def main():
     ssl_ca = module.params['ca_cert']
     check_hostname = module.params['check_hostname']
     db = ''
+    if module.params['force_context']:
+        db = 'mysql'
     set_default_role_all = module.params['set_default_role_all']
     members_must_exist = module.params['members_must_exist']
     column_case_sensitive = module.params['column_case_sensitive']

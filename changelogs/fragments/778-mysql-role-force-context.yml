@@ -1,0 +1,5 @@
+---
+minor_changes:
+  - mysql_role - add the ``force_context`` option to run the role statements with ``mysql`` as the default database,
+    so that binlog and replication filters such as ``replicate_ignore_db=mysql`` apply to them, the same way as
+    ``force_context`` in ``mysql_user`` (https://github.com/ansible-collections/ansible.mysql/issues/778).
